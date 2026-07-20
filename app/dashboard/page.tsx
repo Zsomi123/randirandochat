@@ -2,113 +2,138 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { io, Socket } from "socket.io-client"; // Behozzuk a Socket.io klienst
+import { io, Socket } from "socket.io-client";
 
 type Uzenet = { felado: "en" | "partner" | "rendszer"; szoveg: string };
-type PartnerAdat = { becenev: string; nem: string; kor: number; megye: string } | null;
+type PartnerAdat = { becenev: string; nem: string; kor: number; hobbik?: string[] } | null;
 
 function DashboardTartalom() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // Adatok kinyerése az URL-ből
   const sajatNev = searchParams.get("nev") || "Ismeretlen";
   const sajatKor = searchParams.get("kor") || "18";
   const sajatNem = searchParams.get("nem") || "férfi";
   const keresettNem = searchParams.get("keresettNem") || "nő";
+  const korMin = searchParams.get("korMin") || "18";
+  const korMax = searchParams.get("korMax") || "99";
   const megye = searchParams.get("megye") || "Egész ország";
   const hobbik = searchParams.get("hobbik") || "";
 
-  // State-ek a valós adatokhoz
   const [socket, setSocket] = useState<Socket | null>(null);
   const [keresesFolyamatban, setKeresesFolyamatban] = useState(true);
   const [partner, setPartner] = useState<PartnerAdat>(null);
+  const [kozosHobbik, setKozosHobbik] = useState<string[]>([]);
   const [uzenetek, setUzenetek] = useState<Uzenet[]>([]);
   const [uzenetSzoveg, setUzenetSzoveg] = useState("");
   const [szoba, setSzoba] = useState("");
-  
+
   const uzenetVegRef = useRef<HTMLDivElement>(null);
 
-  // EFEKT: Kapcsolódás a backend szerverhez a belépéskor
+  // Egy helyen tartjuk a regisztrációs csomagot, hogy ne kelljen mindenhol újraépíteni
+  const regisztraciosAdat = () => ({
+    nev: sajatNev,
+    kor: sajatKor,
+    nem: sajatNem,
+    keresettNem: keresettNem,
+    korMin: korMin,
+    korMax: korMax,
+    megyek: megye === "Egész ország" ? [] : megye.split(","),
+    hobbik: hobbik ? hobbik.split(",").filter(Boolean) : [],
+  });
+
   useEffect(() => {
-    // Kapcsolódunk a Node.js szerverünkhöz az 5001-es porton
-    const ujSocket = io("http://localhost:5001");
+    const ujSocket = io("http://localhost:5001", { forceNew: true });
     setSocket(ujSocket);
 
-    // Amint sikeres a kapcsolat, elküldjük a regisztrációs adatainkat a szervernek
     ujSocket.on("connect", () => {
       console.log("🟢 Sikeresen csatlakozva a backendhez!");
-      ujSocket.emit("regisztracio_parositasra", {
-        nev: sajatNev,
-        kor: sajatKor,
-        nem: sajatNem,
-        keresettNem: keresettNem,
-        megyek: megye.split(",")
-      });
+      ujSocket.emit("regisztracio_parositasra", regisztraciosAdat());
     });
 
-    // Figyeljük, ha a szerver azt mondja: SIKERES PÁROSÍTÁS
+    // Amikor sikeres a párosítás, megkapjuk a partner valódi adatait a szervertől
     ujSocket.on("parositas_sikeres", (adat) => {
-      console.log("✨ Párosítás sikeres!", adat);
+      // Védekezés: ha valamiért hiányos adat érkezne (pl. duplikált/elavult
+      // socket-esemény dev módban), ne omoljon össze az app, csak hagyjuk figyelmen kívül.
+      if (!adat || !adat.partner) {
+        console.warn("⚠️ Hiányos parositas_sikeres esemény érkezett, figyelmen kívül hagyva:", adat);
+        return;
+      }
       setSzoba(adat.szoba);
+      setPartner(adat.partner);
+      setKozosHobbik(adat.kozosHobbik || []);
       setKeresesFolyamatban(false);
-      
-      // Beállítunk egy gyors ideiglenes partnert, amíg a szerver nem küld pontosabb profilt
-      setPartner({
-        becenev: "Valódi Partner",
-        nem: keresettNem,
-        kor: 25,
-        megye: megye
-      });
-
-      setUzenetek([{ felado: "rendszer", szoveg: "Sikeresen összekapcsolva! Kezdjetek el beszélgetni." }]);
+      setUzenetek([
+        {
+          felado: "rendszer",
+          szoveg: `Sikeres párosítás! Beszélgetőtársad: ${adat.partner.becenev}.${
+            adat.kozosHobbik && adat.kozosHobbik.length > 0
+              ? ` Közös érdeklődés: ${adat.kozosHobbik.join(", ")}.`
+              : ""
+          }`,
+        },
+      ]);
     });
 
-    // Figyeljük a státuszfrissítéseket a szervertől
-    ujSocket.on("statusz_frissites", (szoveg) => {
-      console.log("ℹ️ Szerver státusz:", szoveg);
+    // FIGYELJÜK A BEJÖVŐ ÜZENETEKET
+    ujSocket.on("chat_uzenet_erkezett", (adat) => {
+      setUzenetek((prev) => [...prev, { felado: "partner", szoveg: adat.szoveg }]);
     });
 
-    // Amikor az oldal bezárul, lekapcsoljuk a socketet
+    // FIGYELJÜK HA A PARTNER KILÉPETT VAGY ELNYOMOTT MINKET
+    ujSocket.on("partner_tovabbnyomta", () => {
+      setUzenetek((prev) => [...prev, { felado: "rendszer", szoveg: "A partner megszakította a kapcsolatot." }]);
+      // Kis késleltetéssel automatikusan új keresést indítunk nekik
+      setTimeout(() => {
+        setKeresesFolyamatban(true);
+        setPartner(null);
+        setKozosHobbik([]);
+        setUzenetek([]);
+        ujSocket.emit("regisztracio_parositasra", regisztraciosAdat());
+      }, 2000);
+    });
+
     return () => {
       ujSocket.disconnect();
     };
-  }, [sajatNev, sajatKor, sajatNem, keresettNem, megye]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sajatNev, sajatKor, sajatNem, keresettNem, korMin, korMax, megye, hobbik]);
 
-  // Automatikus görgetés az új üzenetekhez
   useEffect(() => {
     uzenetVegRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [uzenetek, keresesFolyamatban]);
 
+  // ÜZENET KÜLDÉSE A VALÓSÁGBAN
   const handleKuldes = (e: React.FormEvent) => {
     e.preventDefault();
     const szoveg = uzenetSzoveg.trim();
-    if (!szoveg || !socket) return;
+    if (!szoveg || !socket || !szoba) return;
 
-    // Helyileg hozzáadjuk a saját üzenetünket a képernyőhöz
+    // Hozzáadjuk a saját képernyőnkhöz
     setUzenetek((prev) => [...prev, { felado: "en", szoveg }]);
-    setUzenetSzoveg("");
 
-    // Későbbi fázis: itt fogjuk socket.emit-tel kiküldeni a szobába az üzenetet
+    // KILŐJÜK A SZERVERNEK A SZOBA AZONOSÍTÓVAL EGYÜTT
+    socket.emit("chat_uzenet", { szoba, szoveg });
+
+    setUzenetSzoveg("");
   };
 
+  // TOVÁBBNYOMÁS A VALÓSÁGBAN
   const handleKovetkezoPartner = () => {
     if (!socket) return;
+
+    // Szólunk a szervernek, hogy lépnénk
+    socket.emit("partner_eldobasa");
+
+    // Visszaállítjuk a töltőképernyőt és újra sorba állunk
     setKeresesFolyamatban(true);
     setPartner(null);
+    setKozosHobbik([]);
     setUzenetek([]);
-    
-    // Lekapcsolódunk és újraregisztrálunk, hogy a szerver új listába tegyen minket
-    socket.emit("regisztracio_parositasra", {
-      nev: sajatNev,
-      kor: sajatKor,
-      nem: sajatNem,
-      keresettNem: keresettNem,
-      megyek: megye.split(",")
-    });
+
+    socket.emit("regisztracio_parositasra", regisztraciosAdat());
   };
 
-  // 1. TÖLTŐKÉPERNYŐ (Amíg a szerver párt keres)
   if (keresesFolyamatban) {
     return (
       <main className="flex h-screen flex-col items-center justify-center bg-gray-950 p-6 text-white font-sans">
@@ -118,16 +143,16 @@ function DashboardTartalom() {
             <p className="text-base font-semibold text-white">Partner keresése a szerveren...</p>
             <p className="text-xs text-gray-400 mt-2">Várólista ellenőrzése...</p>
             <p className="text-[11px] text-gray-500 mt-1">Zóna: {megye}</p>
+            <p className="text-[11px] text-gray-500">Korhatár: {korMin}–{korMax} év</p>
           </div>
         </div>
       </main>
     );
   }
 
-  // 2. A KÉSZ CHAT ABLAK (Ha talált párt a szerver)
   return (
     <main className="flex h-screen flex-col bg-gray-950 text-white font-sans overflow-hidden">
-      
+
       <header className="p-4 bg-gray-900 border-b border-gray-800 shadow-md flex items-center justify-between z-10">
         <div className="min-w-0 flex-1 pr-4">
           <div className="flex items-center gap-2 flex-wrap">
@@ -142,9 +167,14 @@ function DashboardTartalom() {
               {partner?.nem} ({partner?.kor})
             </span>
           </div>
+          {kozosHobbik.length > 0 && (
+            <p className="text-[11px] text-gray-500 mt-1 truncate">
+              Közös érdeklődés: <span className="text-pink-400">{kozosHobbik.join(", ")}</span>
+            </p>
+          )}
         </div>
 
-        <button 
+        <button
           onClick={() => alert("Jelentés beküldve.")}
           className="px-3 py-1.5 text-xs font-semibold bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition whitespace-nowrap active:scale-95"
         >
@@ -154,13 +184,13 @@ function DashboardTartalom() {
 
       <section className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-950/50 scrollbar-thin">
         {uzenetek.map((uz, i) => (
-          <div 
-            key={i} 
+          <div
+            key={i}
             className={`flex ${uz.felado === "en" ? "justify-end" : uz.felado === "rendszer" ? "justify-center" : "justify-start"}`}
           >
             <div className={`max-w-[75%] p-3 rounded-2xl text-sm shadow-sm transition-all ${
-              uz.felado === "en" 
-                ? "bg-pink-600 text-white rounded-tr-none" 
+              uz.felado === "en"
+                ? "bg-pink-600 text-white rounded-tr-none"
                 : uz.felado === "rendszer"
                 ? "bg-gray-800/50 text-gray-400 text-xs text-center italic rounded-lg border border-gray-800/30 px-4"
                 : "bg-gray-800 text-gray-200 rounded-tl-none"
@@ -173,7 +203,7 @@ function DashboardTartalom() {
       </section>
 
       <footer className="p-4 bg-gray-900 border-t border-gray-800 flex flex-col sm:flex-row gap-3 items-center z-10">
-        <button 
+        <button
           onClick={handleKovetkezoPartner}
           className="w-full sm:w-auto px-5 py-3 bg-gray-850 hover:bg-gray-800 text-gray-300 hover:text-white font-semibold rounded-xl transition duration-200 flex items-center justify-center gap-2 border border-gray-700 whitespace-nowrap active:scale-95"
         >
@@ -181,14 +211,14 @@ function DashboardTartalom() {
         </button>
 
         <form onSubmit={handleKuldes} className="w-full flex gap-2">
-          <input 
-            type="text" 
-            placeholder="Írj egy üzenetet..."
+          <input
+            type="text"
+            placeholder={partner ? `Írj ${partner.becenev} részére...` : "Írj egy üzenetet..."}
             value={uzenetSzoveg}
             onChange={(e) => setUzenetSzoveg(e.target.value)}
             className="flex-1 p-3 rounded-xl bg-gray-800 border border-gray-700 focus:outline-none focus:border-pink-500 text-white text-sm transition"
           />
-          <button 
+          <button
             type="submit"
             className="px-6 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-xl transition active:scale-95"
           >
