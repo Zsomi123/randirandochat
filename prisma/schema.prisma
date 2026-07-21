@@ -7,36 +7,61 @@ datasource db {
   provider = "postgresql"
 }
 
-// 1. FELHASZNÁLÓI TÁBLA (Itt tároljuk a regisztrált usereket)
-model User {
-  id            String    @id @default(cuid()) // Egyedi belső azonosító
-  email         String?   @unique              // Google fiók esetén az e-mail cím
-  googleId      String?   @unique              // Google OAuth azonosító
-  becenev       String?                        // A választott randi becenév
-  kor           Int?                           // Életkor
-  nem           String?                        // Te nemed
-  keresettNem   String?                        // Kit keresel
-  megyek        String[]  @default([])         // Kijelölt megyék listája
-  hobbik        String[]  @default([])         // Hobbik/tulajdonságok
-  napiLimit     Int       @default(20)         // Fennmaradó napi ingyenes pörgetés
-  isPremium     Boolean   @default(false)      // Előfizető-e
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+// --- NEXTAUTH KÖTELEZŐ TÁBLÁK ---
 
-  // Kapcsolat a jelentésekkel
-  jelenteseim   Report[]  @relation("ReporterUser")
-  jelentettek   Report[]  @relation("ReportedUser")
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String? @db.Text
+  access_token       String? @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String? @db.Text
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
 }
 
-// 2. MODERÁCIÓS / REPORT TÁBLA (A visszaélések és AI szűrések naplózására)
-model Report {
-  id             String   @id @default(cuid())
-  reporteroId    String
-  jelentettId    String
-  ok             String   // pl: "zaklatás", "inappropriate content"
-  chatKivonat    String?  @db.Text // A beszélgetés utolsó pár sora az AI ellenőrzéshez
-  createdAt      DateTime @default(now())
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
 
-  reporter       User     @relation("ReporterUser", fields: [reporteroId], references: [id])
-  jelentettUser  User     @relation("ReportedUser", fields: [jelentettId], references: [id])
+// --- A TE FELHASZNÁLÓI TÁBLÁD FELFEJLESZTVE ---
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+
+  // Randirandochat egyedi adatok (opcionálisak, mert bejelentkezés után tölti ki őket)
+  becenev       String?
+  kor           Int?
+  nem           String?
+  keresettNem   String?
+  megyek        String[]
+  hobbik        String[]
+  napiLimit     Int       @default(20)
+
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
 }

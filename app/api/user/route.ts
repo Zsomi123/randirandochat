@@ -4,34 +4,34 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { nev, kor, nem, keresettNem, megyek, hobbik } = body;
+    const { nev, kor, nem, keresettNem, megyek, hobbik, email } = body;
 
-    if (!nev || !kor) {
+    // 1. Biztonsági ellenőrzés: Csak bejelentkezett usereket engedünk tovább!
+    if (!email) {
       return NextResponse.json(
-        { error: "Név és kor megadása kötelező!" },
-        { status: 400 }
+        { success: false, error: "Nincs bejelentkezve!" },
+        { status: 401 }
       );
     }
 
-    // Felhasználó létrehozása a PostgreSQL adatbázisban
-    const ujUser = await prisma.user.create({
+    // 2. Kikeressük és FRISSÍTJÜK a Google-fiókkal rendelkező usert az adatbázisban
+    const user = await prisma.user.update({
+      where: { email: email },
       data: {
         becenev: nev,
-        kor: parseInt(kor, 10),
-        nem: nem || "férfi",
-        keresettNem: keresettNem || "nő",
-        megyek: Array.isArray(megyek) ? megyek : [],
-        hobbik: Array.isArray(hobbik) ? hobbik : [],
+        kor: Number(kor),
+        nem,
+        keresettNem,
+        megyek,
+        hobbik,
       },
     });
 
-    console.log("💾 Új user elmentve az adatbázisba:", ujUser.id);
-
-    return NextResponse.json({ success: true, userId: ujUser.id });
+    return NextResponse.json({ success: true, userId: user.id });
   } catch (error) {
-    console.error("❌ Adatbázis mentési hiba:", error);
+    console.error("Hiba a mentésnél:", error);
     return NextResponse.json(
-      { error: "Hiba történt a mentés során." },
+      { success: false, error: "Szerver hiba történt a mentés során." },
       { status: 500 }
     );
   }
