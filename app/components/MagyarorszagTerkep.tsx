@@ -54,29 +54,29 @@ export default function MagyarorszagTerkep({
   };
 
   return (
-    <div className="w-full bg-gray-950 p-4 rounded-xl border border-gray-750">
+    <div className="w-full bg-white/[0.02] p-4 rounded-2xl border border-white/[0.07]">
       {/* Fejlec statusszal */}
-      <div className="flex justify-between items-center mb-3">
-        <label className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-          Keresesi zona:{" "}
-          <span className="text-pink-500 normal-case font-bold">
+      <div className="flex justify-between items-center mb-3 gap-3 flex-wrap">
+        <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 font-[family-name:var(--font-geist-mono)]">
+          Keresési zóna:{" "}
+          <span className="text-pink-400 normal-case font-bold tracking-normal">
             {egeszOrszagKijelolve
-              ? "Egesz Magyarorszag"
-              : `${aktualisLista.length} megye kijelolve`}
+              ? "Egész Magyarország"
+              : `${aktualisLista.length} megye kijelölve`}
           </span>
         </label>
 
         <button
           type="button"
           onClick={handleEgeszOrszag}
-          className="text-[11px] px-2.5 py-1 rounded bg-gray-850 hover:bg-gray-800 border border-gray-700 text-gray-300 transition duration-150"
+          className="text-[11px] px-2.5 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-gray-300 transition duration-150"
         >
-          {egeszOrszagKijelolve ? "Kijelolesek torlese" : "Egesz Magyarorszag"}
+          {egeszOrszagKijelolve ? "Kijelölések törlése" : "Egész Magyarország"}
         </button>
       </div>
 
       {/* VALODI, KATTINTHATO SVG TERKEP - a megyehatarok nyilt geoadatbol generalva */}
-      <div className="w-full rounded-lg overflow-hidden bg-gray-900 border border-gray-800 p-2">
+      <div className="w-full rounded-xl overflow-hidden bg-[#0d0f15] border border-white/[0.06] p-2">
         <svg
           viewBox="0 0 800 494"
           xmlns="http://www.w3.org/2000/svg"
@@ -84,16 +84,16 @@ export default function MagyarorszagTerkep({
         >
           <style>{`
             .county-path {
-              stroke: #111827;
+              stroke: #0a0c11;
               stroke-width: 1.2;
               cursor: pointer;
               transition: fill 0.15s ease, opacity 0.15s ease;
             }
             .county-idle {
-              fill: #374151;
+              fill: #2a2f3a;
             }
             .county-idle:hover {
-              fill: #4b5563;
+              fill: #3a4150;
             }
             .county-selected {
               fill: #ec4899;
@@ -273,7 +273,7 @@ export default function MagyarorszagTerkep({
               key={nev}
               type="button"
               onClick={() => handleMegyeKattintas(nev)}
-              className="text-[11px] px-2 py-1 rounded-full bg-pink-600/20 border border-pink-500 text-pink-400 hover:bg-pink-600/30 transition flex items-center gap-1"
+              className="text-[11px] px-2.5 py-1 rounded-full bg-pink-500/10 border border-pink-500/40 text-pink-400 hover:bg-pink-500/20 transition flex items-center gap-1.5"
             >
               {nev}
               <span className="text-pink-300">×</span>
@@ -282,8 +282,8 @@ export default function MagyarorszagTerkep({
         </div>
       )}
 
-      <p className="text-[10px] text-gray-500 mt-2 italic text-center">
-        Tipp: Kattints egy vagy tobb megyere a terkepen a keresesi korzet bovitesehez!
+      <p className="text-[10px] text-gray-500 mt-3 text-center">
+        Kattints egy vagy több megyére a térképen a keresési körzet bővítéséhez.
       </p>
     </div>
   );

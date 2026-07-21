@@ -1,296 +1,209 @@
-"use client"; // Megmondjuk a Next.js-nek, hogy ez az oldal interaktív (kliensoldali) lesz
+import ParositasForm from "./components/Parositasform";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation"; // Behozzuk a navigációs eszközt
-import MagyarorszagTerkep from "./components/MagyarorszagTerkep"; // Behozzuk a frissített térkép komponenst
+const LEPESEK = [
+  {
+    szam: "01",
+    cim: "Add meg magad",
+    leiras: "Válassz egy becenevet, add meg a korod és kit szeretnél megismerni. Se fénykép, se valós név nem kell.",
+  },
+  {
+    szam: "02",
+    cim: "Szűkítsd a kört",
+    leiras: "Jelöld ki a keresési megyéket a térképen, és pár kattintással add meg az érdeklődési köreidet.",
+  },
+  {
+    szam: "03",
+    cim: "Azonnali párosítás",
+    leiras: "A rendszer másodperceken belül összeköt valakivel, aki illik a preferenciáidhoz és a közös hobbikhoz.",
+  },
+  {
+    szam: "04",
+    cim: "Chat, bármeddig",
+    leiras: "Beszélgess szabadon. Nem alakul a beszélgetés? Egy kattintással új partnert kapsz.",
+  },
+];
 
-// Előre megadott hobbik / érdeklődési körök, amikből lehet választani
-const HOBBI_JAVASLATOK = [
-  "főzés", "gaming", "mozi", "sorozatok", "sport", "edzés", "zene",
-  "utazás", "olvasás", "természetjárás", "fotózás", "tánc", "állatok",
-  "kertészkedés", "borozás", "kávézás", "festés", "programozás",
+const BIZTONSAGI_PONTOK = [
+  {
+    cim: "Teljes anonimitás",
+    leiras: "Nincs fénykép, nincs valós név, nincs nyilvános profil. Csak egy becenév és egy beszélgetés.",
+  },
+  {
+    cim: "18+ korellenőrzés",
+    leiras: "A regisztráció megerősíti, hogy minden felhasználó betöltötte a 18. életévét.",
+  },
+  {
+    cim: "Azonnali jelentés",
+    leiras: "Ha valaki visszaél a felülettel, egy gombnyomással jelentheted, a beszélgetés pedig bármikor lezárható.",
+  },
+  {
+    cim: "Nincs adatmegosztás",
+    leiras: "A beszélgetéseid és preferenciáid nem kerülnek harmadik félhez, hirdetőkhöz.",
+  },
+];
+
+const GYIK = [
+  {
+    kerdes: "Kell email címmel regisztrálnom?",
+    valasz:
+      "Nem. A Randirandochat nem kér email címet vagy jelszót – csak egy becenevet adsz meg, és már kereshetsz is partnert.",
+  },
+  {
+    kerdes: "Láthatja bárki a beszélgetésemet?",
+    valasz:
+      "Nem, a chat csak a két beszélgetőpartner között zajlik. Amint bezárod az ablakot vagy továbblépsz, a beszélgetés nem érhető el újra.",
+  },
+  {
+    kerdes: "Mi történik, ha a partnerem kilép?",
+    valasz:
+      "Erről azonnal értesítést kapsz a chatben, és a rendszer pár másodpercen belül automatikusan új partnert keres neked.",
+  },
+  {
+    kerdes: "Ingyenes a szolgáltatás?",
+    valasz: "Igen, a párosítás és a chat funkció jelenleg teljesen ingyenesen elérhető.",
+  },
 ];
 
 export default function Home() {
-  const router = useRouter(); // Létrehozzuk a navigátort az oldalak közötti váltáshoz
-
-  // A felhasználói adatok memóriája (State-ek)
-  const [nev, setNev] = useState("");
-  const [kor, setKor] = useState("");
-  const [nem, setNem] = useState("férfi");
-  const [keresettNem, setKeresettNem] = useState("nő");
-
-  // Milyen korú partnert keres (tartomány)
-  const [korMin, setKorMin] = useState("18");
-  const [korMax, setKorMax] = useState("99");
-
-  // A megyék memóriája: stringek listáját (tömböt) tárol, kezdetben üres = Egész ország
-  const [kijeloltMegyek, setKijeloltMegyek] = useState<string[]>([]);
-
-  // Hobbik / érdeklődési körök: választható lista + egyedi hozzáadás
-  const [kijeloltHobbik, setKijeloltHobbik] = useState<string[]>([]);
-  const [egyediHobbi, setEgyediHobbi] = useState("");
-
-  const [hibaUzenet, setHibaUzenet] = useState("");
-
-  const toggleHobbi = (hobbi: string) => {
-    setKijeloltHobbik((prev) =>
-      prev.includes(hobbi) ? prev.filter((h) => h !== hobbi) : [...prev, hobbi]
-    );
-  };
-
-  const hozzaadEgyediHobbi = () => {
-    const tiszta = egyediHobbi.trim().toLowerCase();
-    if (tiszta && !kijeloltHobbik.includes(tiszta)) {
-      setKijeloltHobbik((prev) => [...prev, tiszta]);
-    }
-    setEgyediHobbi("");
-  };
-
-  // Ez a függvény fut le, amikor a felhasználó rákattint a "Párosítás indítása" gombra
-  const handleInditas = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setHibaUzenet("");
-
-    if (!nev.trim() || !kor) return;
-
-    const kMin = parseInt(korMin, 10);
-    const kMax = parseInt(korMax, 10);
-    if (isNaN(kMin) || isNaN(kMax) || kMin < 18 || kMax < kMin) {
-      setHibaUzenet("Kérlek adj meg egy érvényes korhatár-tartományt (min. 18 év).");
-      return;
-    }
-
-    const zonaLista = kijeloltMegyek.length === 0 ? ["Egész ország"] : kijeloltMegyek;
-
-    try {
-      // 1. Beküldjük az adatokat a PostgreSQL adatbázisba
-      const res = await fetch("/api/user", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nev,
-          kor,
-          nem,
-          keresettNem,
-          megyek: zonaLista,
-          hobbik: kijeloltHobbik, // <-- ITT: kijeloltHobbik-ra cseréltük!
-        }),
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        // 2. Ha sikeres volt az elmentés, átlépünk a dashboardra a kapott userId-val!
-        router.push(
-          `/dashboard?userId=${data.userId}&nev=${encodeURIComponent(nev)}&kor=${encodeURIComponent(kor)}&nem=${encodeURIComponent(nem)}&keresettNem=${encodeURIComponent(keresettNem)}&korMin=${encodeURIComponent(korMin)}&korMax=${encodeURIComponent(korMax)}&megye=${encodeURIComponent(zonaLista.join(","))}&hobbik=${encodeURIComponent(kijeloltHobbik.join(","))}`
-        );
-      } else {
-        setHibaUzenet("Hiba a mentés során: " + data.error);
-      }
-    } catch (err) {
-      console.error(err);
-      setHibaUzenet("Nem sikerült kapcsolódni a szerverhez.");
-    }
-  };
-
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-6 bg-gray-900 text-white">
-      <div className="w-full max-w-md p-8 bg-gray-800 rounded-2xl shadow-xl border border-gray-700">
-
-        <h1 className="text-3xl font-bold mb-2 text-center text-pink-500 tracking-wide">
-          Randirandochat
-        </h1>
-        <p className="text-sm text-gray-400 text-center mb-6">
-          Kizárólag felnőtteknek! Találd meg a partnered vakrandin.
-        </p>
-
-        {/* Az űrlap kezdete */}
-        <form onSubmit={handleInditas} className="space-y-4">
-
-          {/* Név mező */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-              Becenév
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Pl. Anonimusz"
-              value={nev}
-              onChange={(e) => setNev(e.target.value)}
-              className="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:border-pink-500 text-white text-sm"
-            />
+    <main className="bg-[#0a0c11]">
+      {/* ---------- HERO ---------- */}
+      <section className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-16 pb-20 sm:pt-24 sm:pb-28 grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center overflow-hidden">
+        <div>
+          <span className="inline-block text-[11px] font-[family-name:var(--font-geist-mono)] uppercase tracking-[0.2em] text-pink-400 bg-pink-500/10 border border-pink-500/20 rounded-full px-3 py-1 mb-6">
+            100% anonim · 18+
+          </span>
+          <h1 className="font-[family-name:var(--font-fraunces)] text-4xl sm:text-6xl leading-[1.05] font-medium text-white">
+            Egy kattintás.
+            <br />
+            <span className="italic bg-gradient-to-r from-pink-400 via-rose-400 to-red-400 bg-clip-text text-transparent">
+              Egy idegen.
+            </span>
+            <br />
+            Egy jó beszélgetés.
+          </h1>
+          <p className="mt-6 text-gray-400 text-base sm:text-lg leading-relaxed max-w-lg">
+            Nincs profilkép, nincs végtelen swipe. Megadod, kit keresel és
+            honnan – mi pedig másodperceken belül összekötünk valakivel, akivel
+            tényleg van miről beszélgetni.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center gap-4">
+            <a
+              href="#parositas"
+              className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white font-bold text-sm shadow-lg shadow-pink-500/20 transition active:scale-95"
+            >
+              Párosítás indítása
+            </a>
+            <a
+              href="#hogyan-működik"
+              className="text-sm font-medium text-gray-300 hover:text-pink-400 transition"
+            >
+              Hogyan működik? ↓
+            </a>
           </div>
+        </div>
 
-          {/* Kor mező */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-              Életkor (18+)
-            </label>
-            <input
-              type="number"
-              required
-              min="18"
-              max="100"
-              placeholder="Pl. 25"
-              value={kor}
-              onChange={(e) => setKor(e.target.value)}
-              className="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:border-pink-500 text-white text-sm"
-            />
-          </div>
+        {/* Signature elem: "jelzőfény" – két pont egymásra talál, ahogy a
+            párosítás megye + hobbi alapján összeköt két embert. */}
+        <div className="relative flex items-center justify-center h-72 sm:h-96" aria-hidden="true">
+          <svg viewBox="0 0 360 320" className="w-full h-full max-w-sm">
+            <line x1="90" y1="220" x2="270" y2="100" stroke="#ec489966" strokeWidth="2" className="jelzofeny-vonal" />
+            <circle cx="90" cy="220" r="34" fill="#ec489918" className="jelzofeny-gyuru" />
+            <circle cx="90" cy="220" r="10" fill="#ec4899" className="jelzofeny-pont" />
+            <circle cx="270" cy="100" r="34" fill="#f5b75918" className="jelzofeny-gyuru" style={{ animationDelay: "1.2s" }} />
+            <circle cx="270" cy="100" r="10" fill="#f5b759" className="jelzofeny-pont" style={{ animationDelay: "1.2s" }} />
+            <text x="60" y="260" fill="#9ca3af" fontSize="12" fontFamily="var(--font-geist-mono)">Te</text>
+            <text x="248" y="80" fill="#9ca3af" fontSize="12" fontFamily="var(--font-geist-mono)">Valaki új</text>
+          </svg>
+        </div>
+      </section>
 
-          {/* Nemek (Két oszlopban) */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-                Te nemed
-              </label>
-              <select
-                value={nem}
-                onChange={(e) => setNem(e.target.value)}
-                className="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:border-pink-500 text-white text-sm"
-              >
-                <option value="férfi">Férfi</option>
-                <option value="nő">Nő</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-                Kit keresel?
-              </label>
-              <select
-                value={keresettNem}
-                onChange={(e) => setKeresettNem(e.target.value)}
-                className="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:border-pink-500 text-white text-sm"
-              >
-                <option value="nő">Nőt</option>
-                <option value="férfi">Férfit</option>
-                <option value="bárki">Bárkit</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Korhatár tartomány, hogy hány éves partnert keres */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-              Milyen korú partnert keresel?
-            </label>
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                required
-                min="18"
-                max="100"
-                value={korMin}
-                onChange={(e) => setKorMin(e.target.value)}
-                className="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:border-pink-500 text-white text-sm"
-              />
-              <span className="text-gray-500 text-xs">–</span>
-              <input
-                type="number"
-                required
-                min="18"
-                max="100"
-                value={korMax}
-                onChange={(e) => setKorMax(e.target.value)}
-                className="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:border-pink-500 text-white text-sm"
-              />
-            </div>
-            {hibaUzenet && (
-              <p className="text-[11px] text-red-400 mt-1">{hibaUzenet}</p>
-            )}
-          </div>
-
-          {/* INTERAKTÍV TÉRKÉP PANEL
-              Átadjuk a kijelölt megyék listáját és a frissítő függvényt a komponensnek */}
-          <MagyarorszagTerkep
-            kijeloltMegyek={kijeloltMegyek}
-            onMegyekModositasa={setKijeloltMegyek}
-          />
-
-          {/* Hobbik / érdeklődési körök választó */}
-          <div className="w-full bg-gray-950 p-4 rounded-xl border border-gray-750">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-              Hobbik, érdeklődési körök{" "}
-              <span className="text-pink-500 normal-case font-bold">
-                ({kijeloltHobbik.length} kiválasztva)
-              </span>
-            </label>
-
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              {HOBBI_JAVASLATOK.map((h) => (
-                <button
-                  key={h}
-                  type="button"
-                  onClick={() => toggleHobbi(h)}
-                  className={`text-[11px] px-2.5 py-1 rounded-full border transition ${
-                    kijeloltHobbik.includes(h)
-                      ? "bg-pink-600/20 border-pink-500 text-pink-400"
-                      : "bg-gray-850 border-gray-700 text-gray-300 hover:bg-gray-800"
-                  }`}
-                >
-                  {h}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Saját hobbi hozzáadása..."
-                value={egyediHobbi}
-                onChange={(e) => setEgyediHobbi(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    hozzaadEgyediHobbi();
-                  }
-                }}
-                className="flex-1 p-2.5 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:border-pink-500 text-white text-xs"
-              />
-              <button
-                type="button"
-                onClick={hozzaadEgyediHobbi}
-                className="px-3 text-xs font-semibold bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-300 transition"
-              >
-                + Hozzáad
-              </button>
-            </div>
-
-            {kijeloltHobbik.some((h) => !HOBBI_JAVASLATOK.includes(h)) && (
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {kijeloltHobbik
-                  .filter((h) => !HOBBI_JAVASLATOK.includes(h))
-                  .map((h) => (
-                    <button
-                      key={h}
-                      type="button"
-                      onClick={() => toggleHobbi(h)}
-                      className="text-[11px] px-2 py-1 rounded-full bg-pink-600/20 border border-pink-500 text-pink-400 hover:bg-pink-600/30 transition flex items-center gap-1"
-                    >
-                      {h}
-                      <span className="text-pink-300">×</span>
-                    </button>
-                  ))}
+      {/* ---------- HOGYAN MŰKÖDIK ---------- */}
+      <section id="hogyan-működik" className="max-w-6xl mx-auto px-4 sm:px-6 py-20 border-t border-white/[0.06]">
+        <div className="max-w-xl mb-12">
+          <span className="text-[11px] font-[family-name:var(--font-geist-mono)] uppercase tracking-[0.2em] text-pink-400">
+            Hogyan működik
+          </span>
+          <h2 className="mt-3 font-[family-name:var(--font-fraunces)] text-3xl sm:text-4xl text-white">
+            Négy lépés a beszélgetésig
+          </h2>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {LEPESEK.map((l) => (
+            <div key={l.szam} className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6">
+              <div className="font-[family-name:var(--font-fraunces)] italic text-3xl text-pink-500/70 mb-4">
+                {l.szam}
               </div>
-            )}
+              <h3 className="text-white font-semibold mb-2">{l.cim}</h3>
+              <p className="text-gray-400 text-sm leading-relaxed">{l.leiras}</p>
+            </div>
+          ))}
+        </div>
+      </section>
 
-            <p className="text-[10px] text-gray-500 mt-2 italic text-center">
-              Legalább 1 közös hobbi/érdeklődési kör kell majd a párosításhoz (ha mindkét fél megadott legalább egyet).
+      {/* ---------- BIZTONSÁG ---------- */}
+      <section id="biztonsag" className="max-w-6xl mx-auto px-4 sm:px-6 py-20 border-t border-white/[0.06]">
+        <div className="grid lg:grid-cols-[0.8fr_1.2fr] gap-12">
+          <div>
+            <span className="text-[11px] font-[family-name:var(--font-geist-mono)] uppercase tracking-[0.2em] text-pink-400">
+              Anonimitás & biztonság
+            </span>
+            <h2 className="mt-3 font-[family-name:var(--font-fraunces)] text-3xl sm:text-4xl text-white">
+              A profilod te magad vagy – semmi több
+            </h2>
+            <p className="mt-4 text-gray-400 text-sm leading-relaxed max-w-md">
+              Nincs kép, nincs életrajz, nincs végtelen görgetés. A
+              beszélgetésen múlik minden, nem egy megkomponált profilon.
             </p>
           </div>
+          <div className="grid sm:grid-cols-2 gap-5">
+            {BIZTONSAGI_PONTOK.map((b) => (
+              <div key={b.cim} className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-5">
+                <h3 className="text-white font-semibold text-sm mb-1.5">{b.cim}</h3>
+                <p className="text-gray-400 text-[13px] leading-relaxed">{b.leiras}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
-          {/* Indító gomb */}
-          <button
-            type="submit"
-            className="w-full mt-2 p-4 bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white font-bold rounded-lg shadow-lg transition duration-200 transform active:scale-95 text-sm"
-          >
-            Párosítás indítása
-          </button>
+      {/* ---------- PÁROSÍTÁS ŰRLAP ---------- */}
+      <section id="parositas" className="max-w-3xl mx-auto px-4 sm:px-6 py-20 border-t border-white/[0.06]">
+        <div className="text-center mb-10">
+          <span className="text-[11px] font-[family-name:var(--font-geist-mono)] uppercase tracking-[0.2em] text-pink-400">
+            Kezdjük el
+          </span>
+          <h2 className="mt-3 font-[family-name:var(--font-fraunces)] text-3xl sm:text-4xl text-white">
+            Töltsd ki, és indul a keresés
+          </h2>
+        </div>
+        <div className="rounded-3xl border border-white/[0.08] bg-white/[0.02] p-6 sm:p-8">
+          <ParositasForm />
+        </div>
+      </section>
 
-        </form>
-      </div>
+      {/* ---------- GYIK ---------- */}
+      <section id="gyik" className="max-w-3xl mx-auto px-4 sm:px-6 py-20 border-t border-white/[0.06]">
+        <div className="mb-10">
+          <span className="text-[11px] font-[family-name:var(--font-geist-mono)] uppercase tracking-[0.2em] text-pink-400">
+            GY.I.K.
+          </span>
+          <h2 className="mt-3 font-[family-name:var(--font-fraunces)] text-3xl sm:text-4xl text-white">
+            Amit még jó tudni
+          </h2>
+        </div>
+        <div className="divide-y divide-white/[0.07] border-y border-white/[0.07]">
+          {GYIK.map((g) => (
+            <details key={g.kerdes} className="group py-5">
+              <summary className="flex items-center justify-between cursor-pointer list-none text-white font-medium text-sm sm:text-base">
+                {g.kerdes}
+                <span className="ml-4 text-pink-400 transition-transform group-open:rotate-45 text-lg leading-none">+</span>
+              </summary>
+              <p className="mt-3 text-gray-400 text-sm leading-relaxed">{g.valasz}</p>
+            </details>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }

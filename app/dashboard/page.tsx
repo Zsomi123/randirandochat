@@ -136,35 +136,56 @@ function DashboardTartalom() {
 
   if (keresesFolyamatban) {
     return (
-      <main className="flex h-screen flex-col items-center justify-center bg-gray-950 p-6 text-white font-sans">
-        <div className="flex flex-col items-center gap-4 p-8 bg-gray-900 rounded-2xl border border-gray-800 shadow-xl max-w-sm w-full text-center">
-          <div className="h-12 w-12 rounded-full border-4 border-gray-800 border-t-pink-500 animate-spin" />
+      <main className="flex h-screen flex-col items-center justify-center bg-[#0a0c11] p-6 text-white">
+        <div className="flex flex-col items-center gap-2 p-8 sm:p-10 bg-white/[0.02] rounded-3xl border border-white/[0.08] shadow-xl max-w-sm w-full text-center">
+          {/* Jelzőfény animáció újrahasznosítva a "keresés folyamatban" állapotra */}
+          <svg viewBox="0 0 200 120" className="w-40 h-24 mb-2" aria-hidden="true">
+            <line x1="50" y1="85" x2="150" y2="35" stroke="#ec489966" strokeWidth="2" className="jelzofeny-vonal" />
+            <circle cx="50" cy="85" r="24" fill="#ec489918" className="jelzofeny-gyuru" />
+            <circle cx="50" cy="85" r="7" fill="#ec4899" className="jelzofeny-pont" />
+            <circle cx="150" cy="35" r="24" fill="#f5b75918" className="jelzofeny-gyuru" style={{ animationDelay: "1.2s" }} />
+            <circle cx="150" cy="35" r="7" fill="#f5b759" className="jelzofeny-pont" style={{ animationDelay: "1.2s" }} />
+          </svg>
           <div>
-            <p className="text-base font-semibold text-white">Partner keresése a szerveren...</p>
-            <p className="text-xs text-gray-400 mt-2">Várólista ellenőrzése...</p>
-            <p className="text-[11px] text-gray-500 mt-1">Zóna: {megye}</p>
-            <p className="text-[11px] text-gray-500">Korhatár: {korMin}–{korMax} év</p>
+            <p className="text-base font-semibold text-white">Partner keresése…</p>
+            <p className="text-xs text-gray-500 mt-2">Várólista ellenőrzése a szerveren</p>
+            <div className="flex items-center justify-center gap-3 mt-4 text-[11px] text-gray-500 font-[family-name:var(--font-geist-mono)]">
+              <span className="px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/10">Zóna: {megye}</span>
+              <span className="px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/10">{korMin}–{korMax} év</span>
+            </div>
           </div>
+          <button
+            onClick={() => router.push("/")}
+            className="mt-6 text-xs text-gray-500 hover:text-pink-400 transition"
+          >
+            ← Vissza a beállításokhoz
+          </button>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="flex h-screen flex-col bg-gray-950 text-white font-sans overflow-hidden">
-
-      <header className="p-4 bg-gray-900 border-b border-gray-800 shadow-md flex items-center justify-between z-10">
+    <main className="flex h-screen flex-col bg-[#0a0c11] text-white overflow-hidden">
+      <header className="p-4 bg-[#0d0f15]/90 backdrop-blur border-b border-white/[0.07] shadow-md flex items-center justify-between z-10">
         <div className="min-w-0 flex-1 pr-4">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <button
               onClick={() => router.push("/")}
-              className="mr-1 p-1 text-gray-500 hover:text-pink-500 transition text-sm font-bold"
+              aria-label="Vissza a főoldalra"
+              className="p-1 text-gray-500 hover:text-pink-500 transition text-sm font-bold"
             >
-              ➔
+              ←
             </button>
-            <h2 className="text-xl font-bold text-pink-500 truncate">{partner?.becenev}</h2>
-            <span className="text-sm px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 font-semibold uppercase tracking-wider text-[10px]">
-              {partner?.nem} ({partner?.kor})
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
+            </span>
+            <h2 className="font-[family-name:var(--font-fraunces)] italic text-xl text-pink-400 truncate">
+              {partner?.becenev}
+            </h2>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 font-semibold uppercase tracking-wider border border-pink-500/20">
+              {partner?.nem} · {partner?.kor}
             </span>
           </div>
           {kozosHobbik.length > 0 && (
@@ -182,19 +203,21 @@ function DashboardTartalom() {
         </button>
       </header>
 
-      <section className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-950/50 scrollbar-thin">
+      <section className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 scrollbar-thin">
         {uzenetek.map((uz, i) => (
           <div
             key={i}
             className={`flex ${uz.felado === "en" ? "justify-end" : uz.felado === "rendszer" ? "justify-center" : "justify-start"}`}
           >
-            <div className={`max-w-[75%] p-3 rounded-2xl text-sm shadow-sm transition-all ${
-              uz.felado === "en"
-                ? "bg-pink-600 text-white rounded-tr-none"
-                : uz.felado === "rendszer"
-                ? "bg-gray-800/50 text-gray-400 text-xs text-center italic rounded-lg border border-gray-800/30 px-4"
-                : "bg-gray-800 text-gray-200 rounded-tl-none"
-            }`}>
+            <div
+              className={`max-w-[80%] sm:max-w-[65%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${
+                uz.felado === "en"
+                  ? "bg-gradient-to-br from-pink-500 to-rose-600 text-white rounded-br-md"
+                  : uz.felado === "rendszer"
+                  ? "bg-white/[0.04] text-gray-400 text-xs text-center rounded-lg border border-white/[0.06] px-4"
+                  : "bg-white/[0.06] text-gray-100 rounded-bl-md"
+              }`}
+            >
               {uz.szoveg}
             </div>
           </div>
@@ -202,38 +225,46 @@ function DashboardTartalom() {
         <div ref={uzenetVegRef} />
       </section>
 
-      <footer className="p-4 bg-gray-900 border-t border-gray-800 flex flex-col sm:flex-row gap-3 items-center z-10">
+      <footer className="p-3 sm:p-4 bg-[#0d0f15]/90 backdrop-blur border-t border-white/[0.07] flex flex-col sm:flex-row gap-3 items-stretch sm:items-center z-10">
         <button
           onClick={handleKovetkezoPartner}
-          className="w-full sm:w-auto px-5 py-3 bg-gray-850 hover:bg-gray-800 text-gray-300 hover:text-white font-semibold rounded-xl transition duration-200 flex items-center justify-center gap-2 border border-gray-700 whitespace-nowrap active:scale-95"
+          className="w-full sm:w-auto px-5 py-3 bg-white/[0.03] hover:bg-white/[0.07] text-gray-300 hover:text-white font-semibold rounded-xl transition duration-200 flex items-center justify-center gap-2 border border-white/10 whitespace-nowrap active:scale-95"
         >
-          Következő partner ➔
+          Következő partner →
         </button>
 
         <form onSubmit={handleKuldes} className="w-full flex gap-2">
           <input
             type="text"
-            placeholder={partner ? `Írj ${partner.becenev} részére...` : "Írj egy üzenetet..."}
+            placeholder={partner ? `Írj ${partner.becenev} részére…` : "Írj egy üzenetet…"}
             value={uzenetSzoveg}
             onChange={(e) => setUzenetSzoveg(e.target.value)}
-            className="flex-1 p-3 rounded-xl bg-gray-800 border border-gray-700 focus:outline-none focus:border-pink-500 text-white text-sm transition"
+            maxLength={500}
+            autoFocus
+            className="flex-1 p-3 rounded-xl bg-white/[0.03] border border-white/10 focus:border-pink-500 text-white text-sm transition outline-none"
           />
           <button
             type="submit"
-            className="px-6 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-xl transition active:scale-95"
+            disabled={!uzenetSzoveg.trim()}
+            className="px-6 bg-pink-500 hover:bg-pink-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl transition active:scale-95"
           >
             Küldés
           </button>
         </form>
       </footer>
-
     </main>
   );
 }
 
 export default function Dashboard() {
   return (
-    <Suspense fallback={<main className="min-h-screen bg-gray-950 flex items-center justify-center text-gray-500 text-sm">Betöltés…</main>}>
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[#0a0c11] flex items-center justify-center text-gray-500 text-sm">
+          Betöltés…
+        </main>
+      }
+    >
       <DashboardTartalom />
     </Suspense>
   );
