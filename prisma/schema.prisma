@@ -1,0 +1,42 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 1. FELHASZNÁLÓI TÁBLA (Itt tároljuk a regisztrált usereket)
+model User {
+  id            String    @id @default(cuid()) // Egyedi belső azonosító
+  email         String?   @unique              // Google fiók esetén az e-mail cím
+  googleId      String?   @unique              // Google OAuth azonosító
+  becenev       String?                        // A választott randi becenév
+  kor           Int?                           // Életkor
+  nem           String?                        // Te nemed
+  keresettNem   String?                        // Kit keresel
+  megyek        String[]  @default([])         // Kijelölt megyék listája
+  hobbik        String[]  @default([])         // Hobbik/tulajdonságok
+  napiLimit     Int       @default(20)         // Fennmaradó napi ingyenes pörgetés
+  isPremium     Boolean   @default(false)      // Előfizető-e
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Kapcsolat a jelentésekkel
+  jelenteseim   Report[]  @relation("ReporterUser")
+  jelentettek   Report[]  @relation("ReportedUser")
+}
+
+// 2. MODERÁCIÓS / REPORT TÁBLA (A visszaélések és AI szűrések naplózására)
+model Report {
+  id             String   @id @default(cuid())
+  reporteroId    String
+  jelentettId    String
+  ok             String   // pl: "zaklatás", "inappropriate content"
+  chatKivonat    String?  @db.Text // A beszélgetés utolsó pár sora az AI ellenőrzéshez
+  createdAt      DateTime @default(now())
+
+  reporter       User     @relation("ReporterUser", fields: [reporteroId], references: [id])
+  jelentettUser  User     @relation("ReportedUser", fields: [jelentettId], references: [id])
+}

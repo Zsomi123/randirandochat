@@ -48,7 +48,7 @@ export default function Home() {
   };
 
   // Ez a függvény fut le, amikor a felhasználó rákattint a "Párosítás indítása" gombra
-  const handleInditas = (e: React.FormEvent) => {
+  const handleInditas = async (e: React.FormEvent) => {
     e.preventDefault();
     setHibaUzenet("");
 
@@ -61,13 +61,37 @@ export default function Home() {
       return;
     }
 
-    const zonaParameter = kijeloltMegyek.length === 0 ? "Egész ország" : kijeloltMegyek.join(",");
-    const hobbiParameter = kijeloltHobbik.join(",");
+    const zonaLista = kijeloltMegyek.length === 0 ? ["Egész ország"] : kijeloltMegyek;
 
-    // Átirányítás a dashboardra, de most már továbbítjuk az összes fontos adatot
-    router.push(
-      `/dashboard?nev=${encodeURIComponent(nev)}&kor=${encodeURIComponent(kor)}&nem=${encodeURIComponent(nem)}&keresettNem=${encodeURIComponent(keresettNem)}&korMin=${encodeURIComponent(korMin)}&korMax=${encodeURIComponent(korMax)}&megye=${encodeURIComponent(zonaParameter)}&hobbik=${encodeURIComponent(hobbiParameter)}`
-    );
+    try {
+      // 1. Beküldjük az adatokat a PostgreSQL adatbázisba
+      const res = await fetch("/api/user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nev,
+          kor,
+          nem,
+          keresettNem,
+          megyek: zonaLista,
+          hobbik: kijeloltHobbik, // <-- ITT: kijeloltHobbik-ra cseréltük!
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        // 2. Ha sikeres volt az elmentés, átlépünk a dashboardra a kapott userId-val!
+        router.push(
+          `/dashboard?userId=${data.userId}&nev=${encodeURIComponent(nev)}&kor=${encodeURIComponent(kor)}&nem=${encodeURIComponent(nem)}&keresettNem=${encodeURIComponent(keresettNem)}&korMin=${encodeURIComponent(korMin)}&korMax=${encodeURIComponent(korMax)}&megye=${encodeURIComponent(zonaLista.join(","))}&hobbik=${encodeURIComponent(kijeloltHobbik.join(","))}`
+        );
+      } else {
+        setHibaUzenet("Hiba a mentés során: " + data.error);
+      }
+    } catch (err) {
+      console.error(err);
+      setHibaUzenet("Nem sikerült kapcsolódni a szerverhez.");
+    }
   };
 
   return (
