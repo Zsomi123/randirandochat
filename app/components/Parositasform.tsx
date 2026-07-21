@@ -27,7 +27,7 @@ export default function ParositasForm() {
     setHobbik((prev) => (prev.includes(h) ? prev.filter((x) => x !== h) : [...prev, h]));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setHiba("");
 
@@ -48,18 +48,48 @@ export default function ParositasForm() {
       return;
     }
 
-    const params = new URLSearchParams({
-      nev: becenev.trim(),
-      kor: String(korSzam),
-      nem,
-      keresettNem,
-      korMin: String(korMinSzam),
-      korMax: String(korMaxSzam),
-      megye: megyek.length === 0 || megyek.length === 20 ? "Egész ország" : megyek.join(","),
-      hobbik: hobbik.join(","),
-    });
+    const veglegesMegyek = megyek.length === 0 || megyek.length === 20 ? ["Egész ország"] : megyek;
+    const megyeString = veglegesMegyek.join(",");
 
-    router.push(`/dashboard?${params.toString()}`);
+    try {
+      // 1. Beküldjük az adatokat a backend API-nak (Adatbázis mentés)
+      const res = await fetch("/api/user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nev: becenev.trim(),
+          kor: String(korSzam),
+          nem,
+          keresettNem,
+          megyek: veglegesMegyek,
+          hobbik,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        // 2. Ha az elmentés sikeres volt, átirányítunk a dashboardra az új userId-val
+        const params = new URLSearchParams({
+          userId: data.userId, // Ezt az ID-t az adatbázis generálta
+          nev: becenev.trim(),
+          kor: String(korSzam),
+          nem,
+          keresettNem,
+          korMin: String(korMinSzam),
+          korMax: String(korMaxSzam),
+          megye: megyeString,
+          hobbik: hobbik.join(","),
+        });
+
+        router.push(`/dashboard?${params.toString()}`);
+      } else {
+        setHiba("Hiba az adatbázis mentés során: " + data.error);
+      }
+    } catch (err) {
+      console.error(err);
+      setHiba("Nem sikerült kapcsolódni a szerverhez.");
+    }
   };
 
   return (
