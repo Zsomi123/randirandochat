@@ -143,6 +143,26 @@ async function noveldLimitet(azonosito) {
   }
 }
 
+// Értesíti a szoba MÁSIK tagját (tagjait), hogy a partnere elhagyta a chatet,
+// majd kitisztítja a szoba-állapotukat (kilépteti őket a socket.io szobából,
+// és nullázza az aktualisSzoba mezőjüket), hogy legközelebb tiszta lappal induljanak.
+// Ezt hívjuk MINDKÉT esetben: amikor valaki a "Következő partner" gombra kattint,
+// ÉS amikor valaki egyszerűen lecsatlakozik (bezárja a böngészőt / megszakad a net).
+function masikFelErtesitese(szobaNev, sajatSocketId) {
+  const szobaTagok = io.sockets.adapter.rooms.get(szobaNev);
+  if (!szobaTagok) return;
+
+  szobaTagok.forEach((sid) => {
+    if (sid === sajatSocketId) return; // saját magunkat nem értesítjük
+    const masik = io.sockets.sockets.get(sid);
+    if (!masik) return;
+
+    masik.emit("partner_tovabbnyomta");
+    masik.aktualisSzoba = null;
+    masik.leave(szobaNev);
+  });
+}
+
 function osszeilleszthetoke(a, b) {
   const nemOk =
     (a.keresettNem === "bárki" || a.keresettNem === b.nem) &&
@@ -302,17 +322,7 @@ io.on("connection", (socket) => {
   socket.on("partner_eldobasa", () => {
     const szobaNev = socket.aktualisSzoba;
     if (szobaNev) {
-      socket.to(szobaNev).emit("partner_tovabbnyomta");
-
-      const masikSocketek = io.sockets.adapter.rooms.get(szobaNev);
-      if (masikSocketek) {
-        masikSocketek.forEach((sid) => {
-          if (sid !== socket.id) {
-            const masik = io.sockets.sockets.get(sid);
-            if (masik) masik.aktualisSzoba = null;
-          }
-        });
-      }
+      masikFelErtesitese(szobaNev, socket.id);
 
       socket.leave(szobaNev);
       socket.aktualisSzoba = null;
@@ -326,7 +336,8 @@ io.on("connection", (socket) => {
     varolista = varolista.filter((user) => user.socketId !== socket.id);
 
     if (socket.aktualisSzoba) {
-      socket.to(socket.aktualisSzoba).emit("partner_tovabbnyomta");
+      masikFelErtesitese(socket.aktualisSzoba, socket.id);
+      socket.aktualisSzoba = null;
     }
   });
 });

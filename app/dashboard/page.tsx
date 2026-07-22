@@ -57,6 +57,7 @@ function DashboardTartalom() {
   const [szoba, setSzoba] = useState("");
   const [alulVagyunk, setAlulVagyunk] = useState(true);
   const [olvasatlanSzam, setOlvasatlanSzam] = useState(0);
+  const [partnerElhagyta, setPartnerElhagyta] = useState(false);
 
   // NAPI LIMIT ÁLLAPOT
   const [napiLimit, setNapiLimit] = useState<NapiLimitAdat>(null);
@@ -134,6 +135,7 @@ function DashboardTartalom() {
       setKozosHobbik(adat.kozosHobbik || []);
       setKeresesFolyamatban(false);
       setOlvasatlanSzam(0);
+      setPartnerElhagyta(false);
       setUzenetek([
         {
           felado: "rendszer",
@@ -161,16 +163,11 @@ function DashboardTartalom() {
     ujSocket.on("partner_tovabbnyomta", () => {
       setUzenetek((prev) => [
         ...prev,
-        { felado: "rendszer", szoveg: "A partner megszakította a kapcsolatot.", ido: Date.now() },
+        { felado: "rendszer", szoveg: "A partnered elhagyta a chatet.", ido: Date.now() },
       ]);
-      setTimeout(() => {
-        setKeresesFolyamatban(true);
-        setPartner(null);
-        setKozosHobbik([]);
-        setUzenetek([]);
-        const adatok = regisztraciosAdat();
-        if (adatok) ujSocket.emit("regisztracio_parositasra", adatok);
-      }, 2000);
+      // Nem indítunk automatikusan új keresést – a felhasználó dönti el,
+      // mikor akar új partnert (a "Következő partner" gombbal).
+      setPartnerElhagyta(true);
     });
 
     return () => {
@@ -187,7 +184,8 @@ function DashboardTartalom() {
     const utolso = uzenetek[uzenetek.length - 1];
 
     if (alulVagyunk) {
-      uzenetVegRef.current?.scrollIntoView({ behavior: "smooth" });
+      const el = gorditoRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
       setOlvasatlanSzam(0);
     } else if (utolso.felado !== "en") {
       setOlvasatlanSzam((n) => n + 1);
@@ -197,7 +195,8 @@ function DashboardTartalom() {
 
   useEffect(() => {
     if (!keresesFolyamatban) {
-      uzenetVegRef.current?.scrollIntoView({ behavior: "auto" });
+      const el = gorditoRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
     }
   }, [keresesFolyamatban]);
 
@@ -234,7 +233,8 @@ function DashboardTartalom() {
   };
 
   const ugrasAljara = () => {
-    uzenetVegRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = gorditoRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     setOlvasatlanSzam(0);
   };
 
@@ -250,7 +250,7 @@ function DashboardTartalom() {
   const handleKuldes = (e?: React.FormEvent) => {
     e?.preventDefault();
     const szoveg = uzenetSzoveg.trim();
-    if (!szoveg || !socket || !szoba) return;
+    if (!szoveg || !socket || !szoba || partnerElhagyta) return;
 
     // Hozzáadjuk a saját képernyőnkhöz
     setUzenetek((prev) => [...prev, { felado: "en", szoveg, ido: Date.now() }]);
@@ -283,6 +283,7 @@ function DashboardTartalom() {
     setUzenetek([]);
     setOlvasatlanSzam(0);
     setAlulVagyunk(true);
+    setPartnerElhagyta(false);
 
     socket.emit("regisztracio_parositasra", regisztraciosAdat());
   };
@@ -405,17 +406,28 @@ function DashboardTartalom() {
           )}
         </div>
 
-        <button
-          onClick={() => alert("Jelentés beküldve.")}
-          aria-label="Partner jelentése"
-          className="shrink-0 flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition active:scale-95"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 9v4M12 17h.01" />
-            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-          </svg>
-          <span className="hidden sm:inline">Jelentés</span>
-        </button>
+        <div className="shrink-0 flex items-center gap-1.5 sm:gap-2">
+          <button
+            onClick={handleKovetkezoPartner}
+            aria-label="Következő partner"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold bg-white/[0.04] hover:bg-white/[0.08] text-gray-300 hover:text-white rounded-lg border border-white/10 transition active:scale-95 whitespace-nowrap"
+          >
+            <span className="sm:hidden">Következő →</span>
+            <span className="hidden sm:inline">Következő partner →</span>
+          </button>
+
+          <button
+            onClick={() => alert("Jelentés beküldve.")}
+            aria-label="Partner jelentése"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition active:scale-95"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 9v4M12 17h.01" />
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+            </svg>
+            <span className="hidden sm:inline">Jelentés</span>
+          </button>
+        </div>
       </header>
 
       {/* ---------- ÜZENETFAL ---------- */}
@@ -501,33 +513,31 @@ function DashboardTartalom() {
 
       {/* ---------- BEVITELI SÁV ---------- */}
       <footer
-        className="p-2.5 sm:p-4 bg-[#0d0f15]/90 backdrop-blur border-t border-white/[0.07] flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-end z-10 shrink-0"
+        className="p-2.5 sm:p-4 bg-[#0d0f15]/90 backdrop-blur border-t border-white/[0.07] flex items-end gap-2 sm:gap-3 z-10 shrink-0"
         style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}
       >
-        <button
-          onClick={handleKovetkezoPartner}
-          className="order-2 sm:order-1 w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-white/[0.03] hover:bg-white/[0.07] text-gray-300 hover:text-white text-sm font-semibold rounded-xl transition duration-200 flex items-center justify-center gap-2 border border-white/10 whitespace-nowrap active:scale-95 shrink-0"
-        >
-          <span className="sm:hidden">Következő →</span>
-          <span className="hidden sm:inline">Következő partner →</span>
-        </button>
-
-        <form onSubmit={handleKuldes} className="order-1 sm:order-2 w-full flex gap-2 items-end">
+        <form onSubmit={handleKuldes} className="w-full flex gap-2 items-end">
           <textarea
             ref={textareaRef}
             rows={1}
-            placeholder={partner ? `Írj ${partner.becenev} részére…` : "Írj egy üzenetet…"}
+            placeholder={
+              partnerElhagyta
+                ? "A partnered elhagyta a chatet – kattints a Következő partnerre…"
+                : partner
+                ? `Írj ${partner.becenev} részére…`
+                : "Írj egy üzenetet…"
+            }
             value={uzenetSzoveg}
             onChange={(e) => setUzenetSzoveg(e.target.value)}
             onKeyDown={handleBillentyu}
             maxLength={MAX_UZENET_HOSSZ}
-            autoFocus
-            className="flex-1 p-3 rounded-xl bg-white/[0.03] border border-white/10 focus:border-pink-500 text-white text-sm transition outline-none resize-none leading-relaxed"
+            disabled={partnerElhagyta}
+            className="flex-1 p-3 rounded-xl bg-white/[0.03] border border-white/10 focus:border-pink-500 text-white text-sm transition outline-none resize-none leading-relaxed disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ maxHeight: TEXTAREA_MAX_MAGASSAG }}
           />
           <button
             type="submit"
-            disabled={!uzenetSzoveg.trim()}
+            disabled={!uzenetSzoveg.trim() || partnerElhagyta}
             aria-label="Üzenet küldése"
             className="shrink-0 h-[44px] px-4 sm:px-6 bg-pink-500 hover:bg-pink-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl transition active:scale-95 flex items-center justify-center gap-1.5"
           >
