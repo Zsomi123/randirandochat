@@ -9,6 +9,12 @@ const handler = NextAuth({
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID as string,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+      // EZ AZ ÚJ RÉSZ: Kényszerítjük a Google-t a fiókválasztó képernyőre
+      authorization: {
+        params: {
+          prompt: "select_account",
+        },
+      },
     }),
   ],
   session: {
@@ -17,7 +23,6 @@ const handler = NextAuth({
   callbacks: {
     async session({ session, token }) {
       if (session.user && token.sub) {
-        // Hozzáadjuk az adatbázis ID-t a munkamenethez, hogy később tudjuk használni a párosításnál
         (session.user as any).id = token.sub; 
       }
       return session;
