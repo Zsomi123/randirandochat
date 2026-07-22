@@ -18,6 +18,8 @@ type SajatAdat = {
   hobbik: string[];
 } | null;
 
+type NapiLimitAdat = { limit: number; hasznalt: number; ujraindulasMs: number } | null;
+
 const MAX_UZENET_HOSSZ = 500;
 const TEXTAREA_MAX_MAGASSAG = 120; // px
 
@@ -25,12 +27,21 @@ function idoFormazas(ts: number) {
   return new Date(ts).toLocaleTimeString("hu-HU", { hour: "2-digit", minute: "2-digit" });
 }
 
+function hatralevoIdoFormazas(ms: number) {
+  const osszesMasodperc = Math.max(0, Math.floor(ms / 1000));
+  const ora = Math.floor(osszesMasodperc / 3600);
+  const perc = Math.floor((osszesMasodperc % 3600) / 60);
+  const masodperc = osszesMasodperc % 60;
+  const ket = (n: number) => String(n).padStart(2, "0");
+  return `${ket(ora)}:${ket(perc)}:${ket(masodperc)}`;
+}
+
 function DashboardTartalom() {
   const searchParams = useSearchParams();
   const router = useRouter();
   
   // Hitelesítés ellenőrzése
-  const { status } = useSession(); 
+  const { data: session, status } = useSession();
 
   // Preferenciák a URL-ből (Ezeket nem baj, ha a user módosítja, ez csak a keresésre vonatkozik)
   const korMin = searchParams.get("korMin") || "18";
@@ -46,6 +57,11 @@ function DashboardTartalom() {
   const [szoba, setSzoba] = useState("");
   const [alulVagyunk, setAlulVagyunk] = useState(true);
   const [olvasatlanSzam, setOlvasatlanSzam] = useState(0);
+
+  // NAPI LIMIT ÁLLAPOT
+  const [napiLimit, setNapiLimit] = useState<NapiLimitAdat>(null);
+  const [ujraindulasCelIdo, setUjraindulasCelIdo] = useState<number | null>(null);
+  const [hatralevoIdo, setHatralevoIdo] = useState(0);
 
   const gorditoRef = useRef<HTMLDivElement>(null);
   const uzenetVegRef = useRef<HTMLDivElement>(null);
@@ -91,6 +107,7 @@ function DashboardTartalom() {
       korMax: korMax,
       megyek: sajatAdatok.megyek.length === 0 ? [] : sajatAdatok.megyek,
       hobbik: sajatAdatok.hobbik,
+      email: session?.user?.email || null,
     };
   };
 
@@ -128,6 +145,13 @@ function DashboardTartalom() {
           ido: Date.now(),
         },
       ]);
+    });
+
+    ujSocket.on("napi_limit_elerve", (adat) => {
+      console.warn("🚫 Napi párosítási limit elérve:", adat);
+      setNapiLimit(adat);
+      setUjraindulasCelIdo(Date.now() + (adat?.ujraindulasMs || 0));
+      setKeresesFolyamatban(false);
     });
 
     ujSocket.on("chat_uzenet_erkezett", (adat) => {
@@ -176,6 +200,30 @@ function DashboardTartalom() {
       uzenetVegRef.current?.scrollIntoView({ behavior: "auto" });
     }
   }, [keresesFolyamatban]);
+
+  // NAPI LIMIT VISSZASZÁMLÁLÓ – másodpercenként frissül, és lejáratkor automatikusan újrapróbálkozik
+  useEffect(() => {
+    if (!ujraindulasCelIdo) return;
+
+    const intervallum = setInterval(() => {
+      const maradek = ujraindulasCelIdo - Date.now();
+      if (maradek <= 0) {
+        setHatralevoIdo(0);
+        setNapiLimit(null);
+        setUjraindulasCelIdo(null);
+        setKeresesFolyamatban(true);
+        if (socket) {
+          const adatok = regisztraciosAdat();
+          if (adatok) socket.emit("regisztracio_parositasra", adatok);
+        }
+      } else {
+        setHatralevoIdo(maradek);
+      }
+    }, 1000);
+
+    return () => clearInterval(intervallum);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ujraindulasCelIdo, socket]);
 
   const handleGordites = () => {
     const el = gorditoRef.current;
@@ -238,6 +286,41 @@ function DashboardTartalom() {
 
     socket.emit("regisztracio_parositasra", regisztraciosAdat());
   };
+
+  if (napiLimit) {
+    return (
+      <main className="flex h-screen flex-col items-center justify-center bg-[#0a0c11] p-6 text-white">
+        <div className="flex flex-col items-center gap-3 p-8 sm:p-10 bg-white/[0.02] rounded-3xl border border-pink-500/20 shadow-xl max-w-sm w-full text-center">
+          <span className="text-4xl">💎</span>
+          <h2 className="font-[family-name:var(--font-fraunces)] italic text-xl text-pink-400">
+            Elérted a mai limitet
+          </h2>
+          <p className="text-sm text-gray-400 leading-relaxed">
+            Mára elhasználtad mind a(z) <span className="text-white font-semibold">{napiLimit.limit}</span> ingyenes
+            párosítást. Válts Prémiumra a korlátlan cseveséshez, vagy várj, amíg a limit magától megújul.
+          </p>
+
+          <div className="mt-2 px-4 py-2 rounded-xl bg-white/[0.04] border border-white/10 font-[family-name:var(--font-geist-mono)] text-sm text-gray-300">
+            Új próbálkozás: {hatralevoIdoFormazas(hatralevoIdo)}
+          </div>
+
+          <button
+            onClick={() => router.push("/premium")}
+            className="mt-4 w-full px-5 py-3 bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white text-sm font-bold rounded-xl transition active:scale-95 shadow-lg shadow-pink-500/20"
+          >
+            ✨ Váltás Prémiumra
+          </button>
+
+          <button
+            onClick={() => router.push("/")}
+            className="mt-1 text-xs text-gray-500 hover:text-pink-400 transition"
+          >
+            ← Vissza a beállításokhoz
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   if (keresesFolyamatban) {
     return (
