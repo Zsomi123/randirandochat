@@ -1,6 +1,5 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
@@ -52,7 +51,6 @@ model User {
   keresettNem   String?
   megyek        String[]
   hobbik        String[]
-  napiLimit     Int       @default(20)
 
   accounts      Account[]
   sessions      Session[]
@@ -64,4 +62,10 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model NapiLimit {
+  azonosito String @id // Ide mentjük be az IP címet (pl. "ip_123.45.67.89") vagy az e-mailt
+  hasznalt  Int    @default(0)
+  datum     String // Mai dátum (pl. "2026-07-22"), így éjfélkor magától "nullázódik"
 }
