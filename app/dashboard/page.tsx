@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
-import { useSession } from "next-auth/react"; // <-- Új import a Google hitelesítéshez
+import { useSession, signIn } from "next-auth/react";
 
 type Uzenet = { felado: "en" | "partner" | "rendszer"; szoveg: string; ido: number };
 type PartnerAdat = { becenev: string; nem: string; kor: number; hobbik?: string[] } | null;
@@ -18,7 +18,12 @@ type SajatAdat = {
   hobbik: string[];
 } | null;
 
-type NapiLimitAdat = { limit: number; hasznalt: number; ujraindulasMs: number } | null;
+type NapiLimitAdat = {
+  limit: number;
+  hasznalt: number;
+  ujraindulasMs: number;
+  tipus: "fiokos";
+} | null;
 
 const MAX_UZENET_HOSSZ = 500;
 const TEXTAREA_MAX_MAGASSAG = 120; // px
@@ -39,11 +44,10 @@ function hatralevoIdoFormazas(ms: number) {
 function DashboardTartalom() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  
-  // Hitelesítés ellenőrzése
+
+  // Hitelesítés ellenőrzése – mostantól KÖTELEZŐ, nincs vendég mód
   const { data: session, status } = useSession();
 
-  // Preferenciák a URL-ből (Ezeket nem baj, ha a user módosítja, ez csak a keresésre vonatkozik)
   const korMin = searchParams.get("korMin") || "18";
   const korMax = searchParams.get("korMax") || "99";
 
@@ -68,49 +72,31 @@ function DashboardTartalom() {
   const uzenetVegRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // 1. ADATBÁZIS LEKÉRDEZÉS (Valós, nem hamisítható adatok betöltése)
-  // 1. ADATBÁZIS VAGY VENDÉG ADATOK BETÖLTÉSE
+  // 1. ADATBÁZISBÓL JÖVŐ PROFIL ADATOK BETÖLTÉSE – csak bejelentkezve
   useEffect(() => {
-    if (status === "loading") return;
+    if (status === "loading" || status === "unauthenticated") return;
 
-    // Ha nincs bejelentkezve -> VENDÉG MÓD (nem dobjuk ki!)
-    if (status === "unauthenticated") {
-      setSajatAdatok({
-        nev: searchParams.get("nev") || "Vendég",
-        kor: searchParams.get("kor") || "18",
-        nem: searchParams.get("nem") || "ismeretlen",
-        keresettNem: searchParams.get("keresettNem") || "bárki",
-        megyek: searchParams.get("megye") ? searchParams.get("megye")!.split(",") : [],
-        hobbik: searchParams.get("hobbik") ? searchParams.get("hobbik")!.split(",") : [],
+    fetch("/api/user/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          console.error("Hiba az adatok lekérésekor:", data.error);
+          router.push("/");
+        } else {
+          setSajatAdatok({
+            nev: data.becenev,
+            kor: String(data.kor),
+            nem: data.nem,
+            keresettNem: data.keresettNem,
+            megyek: data.megyek,
+            hobbik: data.hobbik,
+          });
+        }
       });
-      return;
-    }
-
-    // Ha be van jelentkezve -> Jöhetnek az adatbázisos profil adatok
-    if (status === "authenticated") {
-      fetch("/api/user/me")
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.error) {
-            console.error("Hiba az adatok lekérésekor:", data.error);
-            router.push("/");
-          } else {
-            setSajatAdatok({
-              nev: data.becenev,
-              kor: String(data.kor),
-              nem: data.nem,
-              keresettNem: data.keresettNem,
-              megyek: data.megyek,
-              hobbik: data.hobbik,
-            });
-          }
-        });
-    }
   }, [status, router, searchParams]);
 
-  // A regisztrációs csomag most már a biztonságos, adatbázisból származó adatokat használja
   const regisztraciosAdat = () => {
-    if (!sajatAdatok) return null;
+    if (!sajatAdatok || !session?.user?.email) return null;
     return {
       nev: sajatAdatok.nev,
       kor: sajatAdatok.kor,
@@ -120,13 +106,13 @@ function DashboardTartalom() {
       korMax: korMax,
       megyek: sajatAdatok.megyek.length === 0 ? [] : sajatAdatok.megyek,
       hobbik: sajatAdatok.hobbik,
-      email: session?.user?.email || null,
+      email: session.user.email,
     };
   };
 
-  // 2. SOCKET CSATLAKOZÁS (Csak miután megjöttek a hitelesített adatok!)
+  // 2. SOCKET CSATLAKOZÁS (csak hitelesített, profil-adatokkal rendelkező felhasználóknak)
   useEffect(() => {
-    if (!sajatAdatok) return; // Addig nem csatlakozunk a backendhez, amíg nincs meg a személyazonosság
+    if (!sajatAdatok || status !== "authenticated") return;
 
     const ujSocket = io("http://localhost:5001", { forceNew: true });
     setSocket(ujSocket);
@@ -135,6 +121,11 @@ function DashboardTartalom() {
       console.log("🟢 Sikeresen csatlakozva a backendhez!");
       const adatok = regisztraciosAdat();
       if (adatok) ujSocket.emit("regisztracio_parositasra", adatok);
+    });
+
+    ujSocket.on("bejelentkezes_szukseges", () => {
+      // A szerver is megköveteli a bejelentkezést – irányítsuk vissza a főoldalra.
+      router.push("/");
     });
 
     ujSocket.on("parositas_sikeres", (adat) => {
@@ -177,8 +168,6 @@ function DashboardTartalom() {
         ...prev,
         { felado: "rendszer", szoveg: "A partnered elhagyta a chatet.", ido: Date.now() },
       ]);
-      // Nem indítunk automatikusan új keresést – a felhasználó dönti el,
-      // mikor akar új partnert (a "Következő partner" gombbal).
       setPartnerElhagyta(true);
     });
 
@@ -186,11 +175,8 @@ function DashboardTartalom() {
       ujSocket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sajatAdatok, korMin, korMax]); // A dependenciák most a biztonságos objektumok
+  }, [sajatAdatok, status, korMin, korMax]);
 
-  // ... (A komponens további része: useEffect a görgetéshez, handleGordites, handleKuldes, és a JSX return része MARAD a régi!)
-  // Csak akkor görgetünk automatikusan legaljára, ha a felhasználó már ott volt –
-  // ha felfele görgetett a régi üzenetek olvasásához, ne rántsuk el onnan.
   useEffect(() => {
     if (uzenetek.length === 0) return;
     const utolso = uzenetek[uzenetek.length - 1];
@@ -250,7 +236,6 @@ function DashboardTartalom() {
     setOlvasatlanSzam(0);
   };
 
-  // Textarea automatikus magasság-igazítása gépelés közben
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -258,17 +243,14 @@ function DashboardTartalom() {
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_MAGASSAG)}px`;
   }, [uzenetSzoveg]);
 
-  // ÜZENET KÜLDÉSE A VALÓSÁGBAN
   const handleKuldes = (e?: React.FormEvent) => {
     e?.preventDefault();
     const szoveg = uzenetSzoveg.trim();
     if (!szoveg || !socket || !szoba || partnerElhagyta) return;
 
-    // Hozzáadjuk a saját képernyőnkhöz
     setUzenetek((prev) => [...prev, { felado: "en", szoveg, ido: Date.now() }]);
     setAlulVagyunk(true);
 
-    // KILŐJÜK A SZERVERNEK A SZOBA AZONOSÍTÓVAL EGYÜTT
     socket.emit("chat_uzenet", { szoba, szoveg });
 
     setUzenetSzoveg("");
@@ -281,14 +263,11 @@ function DashboardTartalom() {
     }
   };
 
-  // TOVÁBBNYOMÁS A VALÓSÁGBAN
   const handleKovetkezoPartner = () => {
     if (!socket) return;
 
-    // Szólunk a szervernek, hogy lépnénk
     socket.emit("partner_eldobasa");
 
-    // Visszaállítjuk a töltőképernyőt és újra sorba állunk
     setKeresesFolyamatban(true);
     setPartner(null);
     setKozosHobbik([]);
@@ -300,6 +279,44 @@ function DashboardTartalom() {
     socket.emit("regisztracio_parositasra", regisztraciosAdat());
   };
 
+  // --- BEJELENTKEZÉS KÖTELEZŐ – vendég mód nincs többé ---
+  if (status === "loading") {
+    return (
+      <main className="min-h-screen bg-[#0a0c11] flex items-center justify-center text-gray-500 text-sm">
+        Betöltés…
+      </main>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <main className="flex h-screen flex-col items-center justify-center bg-[#0a0c11] p-6 text-white">
+        <div className="flex flex-col items-center gap-3 p-8 sm:p-10 bg-white/[0.02] rounded-3xl border border-pink-500/20 shadow-xl max-w-sm w-full text-center">
+          <span className="text-4xl">🔑</span>
+          <h2 className="font-[family-name:var(--font-fraunces)] italic text-xl text-pink-400">
+            Bejelentkezés szükséges
+          </h2>
+          <p className="text-sm text-gray-400 leading-relaxed">
+            A partnerkereséshez be kell jelentkezned Google-fiókkal. Ez segít megvédeni a közösséget a
+            visszaélésektől.
+          </p>
+          <button
+            onClick={() => signIn("google", { callbackUrl: window.location.href })}
+            className="mt-4 w-full px-5 py-3 bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white text-sm font-bold rounded-xl transition active:scale-95 shadow-lg shadow-pink-500/20"
+          >
+            🔑 Bejelentkezés Google-fiókkal
+          </button>
+          <button
+            onClick={() => router.push("/")}
+            className="mt-1 text-xs text-gray-500 hover:text-pink-400 transition"
+          >
+            ← Vissza a beállításokhoz
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   if (napiLimit) {
     return (
       <main className="flex h-screen flex-col items-center justify-center bg-[#0a0c11] p-6 text-white">
@@ -308,9 +325,11 @@ function DashboardTartalom() {
           <h2 className="font-[family-name:var(--font-fraunces)] italic text-xl text-pink-400">
             Elérted a mai limitet
           </h2>
+
           <p className="text-sm text-gray-400 leading-relaxed">
             Mára elhasználtad mind a(z) <span className="text-white font-semibold">{napiLimit.limit}</span> ingyenes
-            párosítást. Válts Prémiumra a korlátlan cseveséshez, vagy várj, amíg a limit magától megújul.
+            párosítást. 24 óra múlva újra <span className="text-white font-semibold">{napiLimit.limit}</span> ingyenes
+            párosításod lesz, vagy válts Prémiumra a korlátlan cseveséshez most rögtön.
           </p>
 
           <div className="mt-2 px-4 py-2 rounded-xl bg-white/[0.04] border border-white/10 font-[family-name:var(--font-geist-mono)] text-sm text-gray-300">
@@ -339,7 +358,6 @@ function DashboardTartalom() {
     return (
       <main className="flex h-screen flex-col items-center justify-center bg-[#0a0c11] p-6 text-white">
         <div className="flex flex-col items-center gap-2 p-8 sm:p-10 bg-white/[0.02] rounded-3xl border border-white/[0.08] shadow-xl max-w-sm w-full text-center">
-          {/* Jelzőfény animáció újrahasznosítva a "keresés folyamatban" állapotra */}
           <svg viewBox="0 0 200 120" className="w-40 h-24 mb-2" aria-hidden="true">
             <line x1="50" y1="85" x2="150" y2="35" stroke="#ec489966" strokeWidth="2" className="jelzofeny-vonal" />
             <circle cx="50" cy="85" r="24" fill="#ec489918" className="jelzofeny-gyuru" />
@@ -352,8 +370,8 @@ function DashboardTartalom() {
             <p className="text-xs text-gray-500 mt-2">Várólista ellenőrzése a szerveren</p>
             <div className="flex items-center justify-center gap-3 mt-4 text-[11px] text-gray-500 font-[family-name:var(--font-geist-mono)]">
               <span className="px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/10">
-  Zóna: {sajatAdatok?.megyek && sajatAdatok.megyek.length > 0 ? sajatAdatok.megyek.join(", ") : "Egész ország"}
-</span>
+                Zóna: {sajatAdatok?.megyek && sajatAdatok.megyek.length > 0 ? sajatAdatok.megyek.join(", ") : "Egész ország"}
+              </span>
               <span className="px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/10">{korMin}–{korMax} év</span>
             </div>
           </div>
@@ -381,14 +399,10 @@ function DashboardTartalom() {
         }
       `}</style>
 
-      {/* Halvány, elmosott fényfoltok a chat-ablak mögött – csak ott látszanak, ahol
-          a lapon tényleg van hely körülötte (sm és afelett). */}
       <div className="hidden sm:block pointer-events-none absolute -top-24 -left-24 w-80 h-80 rounded-full bg-pink-500/10 blur-3xl" aria-hidden="true" />
       <div className="hidden sm:block pointer-events-none absolute -bottom-24 -right-24 w-80 h-80 rounded-full bg-rose-500/10 blur-3xl" aria-hidden="true" />
 
-      {/* ---------- CHAT ABLAK ---------- */}
       <div className="relative w-full h-full sm:h-[min(88dvh,760px)] sm:max-w-xl sm:rounded-3xl sm:border sm:border-white/[0.08] sm:shadow-2xl sm:shadow-black/40 flex flex-col bg-[#0a0c11] sm:bg-[#0d0f15] overflow-hidden">
-      {/* ---------- FEJLÉC ---------- */}
       <header className="px-3 sm:px-5 py-3 bg-[#0d0f15]/90 backdrop-blur border-b border-white/[0.07] shadow-md flex items-start gap-2 z-10 shrink-0">
         <button
           onClick={() => router.push("/")}
@@ -442,7 +456,6 @@ function DashboardTartalom() {
         </div>
       </header>
 
-      {/* ---------- ÜZENETFAL ---------- */}
       <div className="relative flex-1 min-h-0">
         <section
           ref={gorditoRef}
@@ -509,7 +522,6 @@ function DashboardTartalom() {
           <div ref={uzenetVegRef} />
         </section>
 
-        {/* Lebegő "ugrás legalulra" gomb, ha felgörgettünk és új üzenet jött */}
         {!alulVagyunk && (
           <button
             onClick={ugrasAljara}
@@ -523,7 +535,6 @@ function DashboardTartalom() {
         )}
       </div>
 
-      {/* ---------- BEVITELI SÁV ---------- */}
       <footer
         className="p-2.5 sm:p-4 bg-[#0d0f15]/90 backdrop-blur border-t border-white/[0.07] flex items-end gap-2 sm:gap-3 z-10 shrink-0"
         style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}

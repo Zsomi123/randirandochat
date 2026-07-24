@@ -70,14 +70,28 @@ function ujraindulasMsAMaiNapVegeig() {
   return Math.max(0, ejfel.getTime() - budapestiMost.getTime());
 }
 
-function ervenyesIpAzonosito(ip) {
-  if (!ip || ip === "ismeretlen_ip" || ip === "::1" || ip === "127.0.0.1") return null;
+// Az x-forwarded-for fejléc néha több IP-t is tartalmazhat vesszővel elválasztva
+// (proxy-k láncolata esetén) – nekünk mindig az első, azaz a kliens tényleges
+// IP-je kell, ellenkező esetben a tiltás/limit megkerülhető lenne.
+function nyersIpTisztitasa(ip) {
+  if (!ip) return null;
+  return String(ip).split(",")[0].trim();
+}
+
+function ervenyesIpAzonosito(nyersIp) {
+  const ip = nyersIpTisztitasa(nyersIp);
+  if (!ip || ip === "ismeretlen_ip") return null;
   return `ip_${ip}`;
 }
 
-function limitAzonosito(adatok, ip) {
-  const email = typeof adatok?.email === "string" ? adatok.email.trim().toLowerCase() : null;
-  if (email) return `email_${email}`;
+// FONTOS: mostantól a limit és a tiltás ALAPJA KIZÁRÓLAG AZ IP CÍM.
+// Ennek oka, hogy bejelentkezés most már kötelező, tehát az email cím
+// mindig rendelkezésre áll, viszont ha valakit ki akarunk tiltani, azt
+// nem szabad, hogy egy új Google-fiók regisztrálásával meg tudja kerülni –
+// az IP-alapú azonosítás ezt akadályozza meg. Az email címet emellett
+// külön mezőben eltároljuk minden rekordon (lásd noveldLimitet), hogy
+// nyomon lehessen követni, melyik fiók használta az adott IP-t.
+function sajatAzonosito(ip) {
   return ervenyesIpAzonosito(ip);
 }
 
@@ -95,72 +109,64 @@ async function lekerdezMaiHasznalat(azonosito) {
   }
 }
 
-// --- 1. FÜGGVÉNY: LIMIT NÖVELÉSE ---
-// --- 1. FÜGGVÉNY: LIMIT NÖVELÉSE UPSERT-TEL ---
+// --- 1. FÜGGVÉNY: LIMIT NÖVELÉSE (EGYETLEN, IP ALAPÚ REKORDON, UPSERT-TEL) ---
+// Az email címet is elmentjük/frissítjük a rekordon (nem ez az azonosító kulcs,
+// csak kiegészítő infó, hogy lássuk ki áll a tiltás mögött).
 async function noveldLimitet(email, ip) {
   const maiDatum = getMaiDatum();
-  const azonositok = [];
+  const azonosito = sajatAzonosito(ip);
 
-  if (email) azonositok.push(`email_${email}`);
-  if (ip && ip !== "ismeretlen_ip") {
-    azonositok.push(`ip_${ip}`);
-  }
+  if (!azonosito) return;
 
-  for (const azonosito of azonositok) {
-    try {
-      // Az upsert egyszerre kezeli a létrehozást és a frissítést is, így elkerüljük a duplikációs hibát
-      const friss = await prisma.napiLimit.upsert({
+  try {
+    const friss = await prisma.napiLimit.upsert({
+      where: { azonosito },
+      update: {
+        hasznalt: {
+          increment: 1,
+        },
+        email: email || undefined,
+      },
+      create: {
+        azonosito,
+        hasznalt: 1,
+        datum: maiDatum,
+        email: email || null,
+      },
+    });
+
+    // Ha esetleg új nap van, de létezett a rekord, biztosítjuk a dátum frissítését és nullázását
+    if (friss.datum !== maiDatum) {
+      await prisma.napiLimit.update({
         where: { azonosito },
-        update: {
-          hasznalt: {
-            increment: 1,
-          },
-        },
-        create: {
-          azonosito,
-          hasznalt: 1,
-          datum: maiDatum,
-        },
+        data: { hasznalt: 1, datum: maiDatum, email: email || undefined },
       });
-
-      // Ha esetleg új nap van, de létezett a rekord, biztosítjuk a dátum frissítését és nullázását
-      if (friss.datum !== maiDatum) {
-        await prisma.napiLimit.update({
-          where: { azonosito },
-          data: { hasznalt: 1, datum: maiDatum },
-        });
-      }
-
-      console.log(`💾 Limit mentve: ${azonosito} → ${friss.hasznalt}/${NAPI_LIMIT}`);
-    } catch (error) {
-      console.error("Hiba a limit mentésekor:", error);
     }
+
+    console.log(`💾 Limit mentve (IP alapján): ${azonosito} [${email || "nincs email"}] → ${friss.hasznalt}/${NAPI_LIMIT}`);
+  } catch (error) {
+    console.error("Hiba a limit mentésekor:", error);
   }
 }
 
-// --- 2. FÜGGVÉNY: LIMIT LEKÉRDEZÉSE ---
-async function getLimitHasznalat(email, ip) {
+// --- 2. FÜGGVÉNY: LIMIT LEKÉRDEZÉSE (EGYETLEN, IP ALAPÚ REKORDRÓL) ---
+async function getLimitHasznalat(ip) {
   const maiDatum = getMaiDatum();
-  const azonositok = [];
-  
-  if (email) azonositok.push(`email_${email}`);
-  if (ip && ip !== "ismeretlen_ip") {
-    azonositok.push(`ip_${ip}`);
-  }
+  const azonosito = sajatAzonosito(ip);
 
-  let maxHasznalt = 0;
-  for (const azonosito of azonositok) {
-    try {
-      const rekord = await prisma.napiLimit.findUnique({ where: { azonosito } });
-      if (rekord && rekord.datum === maiDatum) {
-        if (rekord.hasznalt > maxHasznalt) maxHasznalt = rekord.hasznalt;
-      }
-    } catch (error) {
-      console.error("Hiba a limit lekérésekor:", error);
+  if (!azonosito) return 0;
+
+  try {
+    const rekord = await prisma.napiLimit.findUnique({ where: { azonosito } });
+    if (rekord && rekord.datum === maiDatum) {
+      return rekord.hasznalt;
     }
+  } catch (error) {
+    console.error("Hiba a limit lekérésekor:", error);
   }
-  return maxHasznalt;
+  return 0;
 }
+
 
 function masikFelErtesitese(szobaNev, sajatSocketId) {
   const szobaTagok = io.sockets.adapter.rooms.get(szobaNev);
@@ -239,37 +245,54 @@ io.on("connection", (socket) => {
   socket.on("regisztracio_parositasra", async (adatok) => {
     const clientIp = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address;
 
-    const ujUser = { 
-      socketId: socket.id, 
-      ip: clientIp, 
-      ...normalizal(adatok) 
+    // KÖTELEZŐ BEJELENTKEZÉS: vendég mód megszűnt, email nélkül nem
+    // engedjük be a párosítási rendszerbe a felhasználót.
+    const email = typeof adatok?.email === "string" ? adatok.email.trim().toLowerCase() : null;
+    if (!email) {
+      socket.emit("bejelentkezes_szukseges", {
+        uzenet: "A partnerkereséshez be kell jelentkezned Google-fiókkal.",
+      });
+      console.log(`🚫 ${socket.id} bejelentkezés nélkül próbált párosítani – elutasítva.`);
+      return;
+    }
+
+    const ujUser = {
+      socketId: socket.id,
+      ip: clientIp,
+      ...normalizal(adatok),
+      email,
     };
 
-    const JELENLEGI_HASZNALAT = await getLimitHasznalat(ujUser.email, ujUser.ip);
-    const NAPI_LIMIT = 20;
+    // A limit és a tiltás mostantól kizárólag az IP cím alapján történik –
+    // ha valakit kitiltunk, azt az IP-je alapján tesszük, így új Google-fiókkal
+    // sem tud visszatérni ugyanarról a gépről/hálózatról.
+    const JELENLEGI_HASZNALAT = await getLimitHasznalat(ujUser.ip);
 
     if (JELENLEGI_HASZNALAT >= NAPI_LIMIT) {
-      const most = new Date();
-      const holnap = new Date(most.getFullYear(), most.getMonth(), most.getDate() + 1);
-      const ujraindulasMs = holnap.getTime() - most.getTime();
+      const ujraindulasMs = ujraindulasMsAMaiNapVegeig();
 
-      socket.emit("napi_limit_elerve", { limit: NAPI_LIMIT, hasznalt: JELENLEGI_HASZNALAT, ujraindulasMs });
-      console.log(`🚫 ${ujUser.nev} elszállt a limittel (${JELENLEGI_HASZNALAT}/${NAPI_LIMIT}).`);
-      return; 
+      socket.emit("napi_limit_elerve", {
+        limit: NAPI_LIMIT,
+        hasznalt: JELENLEGI_HASZNALAT,
+        ujraindulasMs,
+        tipus: "fiokos",
+      });
+      console.log(`🚫 ${ujUser.nev} (${ujUser.email}) elszállt a limittel (${JELENLEGI_HASZNALAT}/${NAPI_LIMIT}).`);
+      return;
     }
 
     if (socket.disconnected) {
       return;
     }
 
-    varolista = varolista.filter(u => !(u.ip === ujUser.ip && u.nev === ujUser.nev));
+    varolista = varolista.filter(u => !(u.ip === ujUser.ip && u.email === ujUser.email));
 
     socket.sajatAdatok = ujUser;
 
     console.log(
-      `📝 ${ujUser.nev} sorba állt. (kor:${ujUser.kor}, keres:${ujUser.keresettNem} ${ujUser.korMin}-${ujUser.korMax})`
+      `📝 ${ujUser.nev} (${ujUser.email}) sorba állt. (kor:${ujUser.kor}, keres:${ujUser.keresettNem} ${ujUser.korMin}-${ujUser.korMax})`
     );
-    
+
     let partner = null;
     let partnerSocket = null;
     let talalatIndex = -1;
@@ -279,22 +302,22 @@ io.on("connection", (socket) => {
 
       if (osszeilleszthetoke(ujUser, vizsgaltPartner)) {
         const tempSocket = io.sockets.sockets.get(vizsgaltPartner.socketId);
-        
+
         if (tempSocket && tempSocket.connected && !tempSocket.aktualisSzoba) {
           talalatIndex = i;
           partner = vizsgaltPartner;
           partnerSocket = tempSocket;
-          break; 
+          break;
         } else {
           varolista.splice(i, 1);
-          i--; 
+          i--;
         }
       }
     }
 
     if (partner && partnerSocket) {
       varolista.splice(talalatIndex, 1);
-      
+
       const szobaNev = `szoba_${socket.id}_${partner.socketId}`;
 
       socket.join(szobaNev);
@@ -321,7 +344,7 @@ io.on("connection", (socket) => {
       });
 
       console.log(`✨ Párosítva: ${ujUser.nev} 🤝 ${partner.nev}`);
-      
+
     } else {
       varolista = varolista.filter((u) => u.socketId !== socket.id);
       varolista.push(ujUser);
