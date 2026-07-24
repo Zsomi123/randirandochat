@@ -69,12 +69,24 @@ function DashboardTartalom() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 1. ADATBÁZIS LEKÉRDEZÉS (Valós, nem hamisítható adatok betöltése)
+  // 1. ADATBÁZIS VAGY VENDÉG ADATOK BETÖLTÉSE
   useEffect(() => {
+    if (status === "loading") return;
+
+    // Ha nincs bejelentkezve -> VENDÉG MÓD (nem dobjuk ki!)
     if (status === "unauthenticated") {
-      router.push("/"); // Ha nincs belépve, visszadobjuk a főoldalra
+      setSajatAdatok({
+        nev: searchParams.get("nev") || "Vendég",
+        kor: searchParams.get("kor") || "18",
+        nem: searchParams.get("nem") || "ismeretlen",
+        keresettNem: searchParams.get("keresettNem") || "bárki",
+        megyek: searchParams.get("megye") ? searchParams.get("megye")!.split(",") : [],
+        hobbik: searchParams.get("hobbik") ? searchParams.get("hobbik")!.split(",") : [],
+      });
       return;
     }
 
+    // Ha be van jelentkezve -> Jöhetnek az adatbázisos profil adatok
     if (status === "authenticated") {
       fetch("/api/user/me")
         .then((res) => res.json())
@@ -94,7 +106,7 @@ function DashboardTartalom() {
           }
         });
     }
-  }, [status, router]);
+  }, [status, router, searchParams]);
 
   // A regisztrációs csomag most már a biztonságos, adatbázisból származó adatokat használja
   const regisztraciosAdat = () => {
