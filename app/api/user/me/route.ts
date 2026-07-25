@@ -27,6 +27,7 @@ export async function GET(req: Request) {
         keresettNem: true,
         megyek: true,
         hobbik: true,
+        isPremium: true,
       }
     });
 

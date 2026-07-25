@@ -52,6 +52,10 @@ model User {
   megyek        String[]
   hobbik        String[]
 
+  // --- ÚJ: PRÉMIUM ÉS STRIPE ADATOK ---
+  isPremium        Boolean @default(false)
+  stripeCustomerId String? @unique
+
   accounts      Account[]
   sessions      Session[]
 }
