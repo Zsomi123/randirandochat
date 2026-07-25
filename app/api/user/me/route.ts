@@ -28,6 +28,7 @@ export async function GET(req: Request) {
         megyek: true,
         hobbik: true,
         isPremium: true,
+        isAdmin: true,
       }
     });
 

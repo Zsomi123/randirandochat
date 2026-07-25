@@ -56,6 +56,8 @@ model User {
   isPremium        Boolean @default(false)
   stripeCustomerId String? @unique
 
+  isAdmin   Boolean   @default(false)
+
   accounts      Account[]
   sessions      Session[]
 }
