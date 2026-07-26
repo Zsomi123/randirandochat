@@ -1,6 +1,16 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation"; // <-- EZT IMPORTÁLTUK BE
 
 export default function Footer() {
+  const pathname = usePathname(); // <-- LEKÉRJÜK AZ AKTUÁLIS URL-T
+
+  // --- HA AZ ADMIN OLDALON VAGYUNK, NE JELENJEN MEG A FOOTER ---
+  if (pathname?.startsWith("/admin")) {
+    return null;
+  }
+
   return (
     <footer className="w-full bg-[#0a0c11] border-t border-white/[0.06] text-gray-400 text-xs py-12 mt-20">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 md:grid-cols-4 gap-10">

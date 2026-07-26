@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
+import { usePathname } from "next/navigation"; // <-- EZT IMPORTÁLTUK BE
 
 const MENUPONTOK = [
   { href: "#hogyan-működik", label: "Hogyan működik?" },
@@ -11,13 +12,14 @@ const MENUPONTOK = [
 ];
 
 export default function Navbar() {
+  const pathname = usePathname(); // <-- LEKÉRJÜK AZ AKTUÁLIS URL-T
+  
   const [nyitva, setNyitva] = useState(false);
-  const [profilNyitva, setProfilNyitva] = useState(false); // A legördülő menü állapota
+  const [profilNyitva, setProfilNyitva] = useState(false);
   const { data: session, status } = useSession();
   
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // KATTINTÁS FIGYELŐ: Bezárja a menüt, ha máshova kattintasz a képernyőn
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -27,6 +29,11 @@ export default function Navbar() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // --- HA AZ ADMIN OLDALON VAGYUNK, NE JELENJEN MEG A NAVBAR ---
+  if (pathname?.startsWith("/admin")) {
+    return null;
+  }
 
   return (
     <header className="w-full bg-[#0a0c11]/85 backdrop-blur-md border-b border-white/[0.06] sticky top-0 z-50">
@@ -56,7 +63,6 @@ export default function Navbar() {
             <div className="w-8 h-8 rounded-full border-2 border-pink-500/30 border-t-pink-500 animate-spin"></div>
           ) : session ? (
             <div className="relative" ref={dropdownRef}>
-              {/* Profilkép, amire kattintani lehet */}
               <button
                 onClick={() => setProfilNyitva(!profilNyitva)}
                 className="flex items-center gap-2 focus:outline-none transition active:scale-95"
@@ -77,13 +83,11 @@ export default function Navbar() {
               {/* LEGÖRDÜLŐ MENÜ */}
               {profilNyitva && (
                 <div className="absolute right-0 mt-3 w-56 bg-[#12151c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 transform transition-all origin-top-right">
-                  {/* Felhasználó adatai */}
                   <div className="px-4 py-3 bg-white/[0.02] border-b border-white/10">
                     <p className="text-sm text-white font-medium truncate">{session.user?.name}</p>
                     <p className="text-xs text-gray-500 truncate mt-0.5">{session.user?.email}</p>
                   </div>
                   
-                  {/* Menüpontok */}
                   <div className="p-1.5 flex flex-col gap-0.5">
                     <Link 
                       href="/profil" 
@@ -92,8 +96,6 @@ export default function Navbar() {
                     >
                       ⚙️ Saját fiók
                     </Link>
-                    
-                    {/* Ide jön majd később a Fiók törlése gomb, ha elkészítjük a felületét */}
                     
                     <button 
                       onClick={() => signOut()} 
