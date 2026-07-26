@@ -52,11 +52,25 @@ model User {
   megyek        String[]
   hobbik        String[]
 
-  // --- ÚJ: PRÉMIUM ÉS STRIPE ADATOK ---
+  // --- PRÉMIUM ÉS STRIPE ADATOK ---
   isPremium        Boolean @default(false)
   stripeCustomerId String? @unique
 
   isAdmin   Boolean   @default(false)
+
+  // --- ÚJ: UTOLSÓ ISMERT IP (admin IP-keresés miatt) ---
+  lastIp    String?
+
+  // --- ÚJ: EGYEDI NAPI LIMIT FELÜLÍRÁS ---
+  // Ha null, az alapértelmezett (globális) napi limit érvényes rá.
+  // Ha admin beállít egy számot, az felülírja azt erre a felhasználóra.
+  napiLimitOverride Int?
+
+  // --- ÚJ: KITILTÁS (a tényleges banrendszer még nincs kiépítve,
+  // de az admin felület már tud vele dolgozni) ---
+  isBanned    Boolean   @default(false)
+  bannedUntil DateTime? // ha null és isBanned true, az végleges tiltást jelent
+  banReason   String?
 
   accounts      Account[]
   sessions      Session[]

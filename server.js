@@ -20,17 +20,37 @@ const prisma = new PrismaClient({ adapter });
 const app = express();
 app.use(cors());
 
+// FONTOS (JAVÍTÁS): ez mostantól csak az ALAPÉRTELMEZETT / fallback limit,
+// amikor egy felhasználóhoz nincs admin által beállított egyedi napiLimitOverride.
+// A korábbi hiba az volt, hogy ez a konstans volt a TÉNYLEGES, mindenkire
+// egyformán érvényesített limit, és az admin felületen beállított egyedi
+// limitet a szerver soha nem olvasta ki -> ezért nem volt hatása.
+const ALAPERTELMEZETT_NAPI_LIMIT = 20;
+
 app.get("/debug/limit/:azonosito", async (req, res) => {
   try {
     const rekord = await prisma.napiLimit.findUnique({
       where: { azonosito: req.params.azonosito },
     });
     if (!rekord) {
-      return res.json({ azonosito: req.params.azonosito, hasznalt: 0, limit: NAPI_LIMIT, datum: null, letezik: false });
+      return res.json({
+        azonosito: req.params.azonosito,
+        hasznalt: 0,
+        limit: ALAPERTELMEZETT_NAPI_LIMIT,
+        datum: null,
+        letezik: false,
+      });
     }
     const maiDatum = getMaiDatum();
     const aktualisHasznalt = rekord.datum === maiDatum ? rekord.hasznalt : 0;
-    res.json({ ...rekord, maradek: Math.max(0, NAPI_LIMIT - aktualisHasznalt), limit: NAPI_LIMIT, letezik: true });
+    const { limit: sajatLimit, isPremium: sajatPremium } = await lekerdezFelhasznaloLimitAdatok(rekord.email);
+    res.json({
+      ...rekord,
+      isPremium: sajatPremium,
+      maradek: sajatPremium ? null : Math.max(0, sajatLimit - aktualisHasznalt),
+      limit: sajatPremium ? null : sajatLimit,
+      letezik: true,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -40,7 +60,18 @@ app.get("/debug/limit", async (req, res) => {
   try {
     const maiDatum = getMaiDatum();
     const osszes = await prisma.napiLimit.findMany({ where: { datum: maiDatum } });
-    res.json(osszes.map((r) => ({ ...r, maradek: Math.max(0, NAPI_LIMIT - r.hasznalt) })));
+    const eredmeny = await Promise.all(
+      osszes.map(async (r) => {
+        const { limit: sajatLimit, isPremium: sajatPremium } = await lekerdezFelhasznaloLimitAdatok(r.email);
+        return {
+          ...r,
+          isPremium: sajatPremium,
+          limit: sajatPremium ? null : sajatLimit,
+          maradek: sajatPremium ? null : Math.max(0, sajatLimit - r.hasznalt),
+        };
+      })
+    );
+    res.json(eredmeny);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -55,8 +86,6 @@ const io = new Server(server, {
 });
 
 let varolista = [];
-
-const NAPI_LIMIT = 20;
 
 function getMaiDatum() {
   return new Date().toLocaleDateString("hu-HU", { timeZone: "Europe/Budapest" });
@@ -84,15 +113,66 @@ function ervenyesIpAzonosito(nyersIp) {
   return `ip_${ip}`;
 }
 
-// FONTOS: mostantól a limit és a tiltás ALAPJA KIZÁRÓLAG AZ IP CÍM.
+// FONTOS: a limit és a tiltás ALAPJA KIZÁRÓLAG AZ IP CÍM.
 // Ennek oka, hogy bejelentkezés most már kötelező, tehát az email cím
 // mindig rendelkezésre áll, viszont ha valakit ki akarunk tiltani, azt
 // nem szabad, hogy egy új Google-fiók regisztrálásával meg tudja kerülni –
 // az IP-alapú azonosítás ezt akadályozza meg. Az email címet emellett
 // külön mezőben eltároljuk minden rekordon (lásd noveldLimitet), hogy
-// nyomon lehessen követni, melyik fiók használta az adott IP-t.
+// nyomon lehessen követni, melyik fiók használta az adott IP-t, ÉS hogy
+// az admin felület email alapján meg tudja találni és tudja kezelni ezt
+// a rekordot is.
 function sajatAzonosito(ip) {
   return ervenyesIpAzonosito(ip);
+}
+
+// ÚJ (JAVÍTÁS): a felhasználóhoz tartozó tényleges napi limit ÉS a
+// prémium-státusz lekérdezése egyben.
+//
+// FONTOS: prémium előfizetőknél a napi limit/keret értelmét veszti - ők
+// korlátlanul párosíthatnak, ezért a hívó helyen (regisztracio_parositasra)
+// isPremium=true esetén a limit-ellenőrzést teljesen ki kell hagyni,
+// függetlenül attól, hogy van-e egyedi napiLimitOverride beállítva rájuk.
+//
+// FONTOS DEBUG SEGÍTSÉG: ha ez a függvény hibát dob (pl. mert a server.js
+// által használt generált Prisma Client elavult és nem ismeri a
+// napiLimitOverride/isPremium mezőt - ilyenkor kell egy `npx prisma generate`
+// + szerver-restart), azt itt EXPLICIT logoljuk, és utána esik vissza az
+// alapértelmezett, nem-prémium állapotra. Ha mindig 20-at kapsz annak
+// ellenére, hogy nagyobb keretet állítottál be az adott userre, NÉZD MEG a
+// terminált, ami ezt a server.js-t futtatja - ott meg kell jelennie az
+// alábbi logok egyikének minden párosítási kísérletnél.
+async function lekerdezFelhasznaloLimitAdatok(email) {
+  if (!email) {
+    console.warn("⚠️ lekerdezFelhasznaloLimitAdatok: nincs email, alapértelmezett/nem-prémium állapotot adunk vissza.");
+    return { isPremium: false, limit: ALAPERTELMEZETT_NAPI_LIMIT };
+  }
+  try {
+    // findFirst + case-insensitive mode, hogy egy esetleges kis-/nagybetű
+    // eltérés (DB vs. bejelentkezett email) ne okozzon "nem található user"
+    // hibát, és ezáltal ne essünk vissza csendben az alapértelmezettre.
+    const user = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
+      select: { napiLimitOverride: true, isPremium: true, email: true },
+    });
+
+    if (!user) {
+      console.warn(`⚠️ lekerdezFelhasznaloLimitAdatok: nem található user ezzel az emaillel: "${email}" -> ALAPERTELMEZETT_NAPI_LIMIT (${ALAPERTELMEZETT_NAPI_LIMIT}), nem prémium.`);
+      return { isPremium: false, limit: ALAPERTELMEZETT_NAPI_LIMIT };
+    }
+
+    const limit = user.napiLimitOverride != null ? user.napiLimitOverride : ALAPERTELMEZETT_NAPI_LIMIT;
+    console.log(
+      `ℹ️ lekerdezFelhasznaloLimitAdatok: ${email} -> isPremium=${user.isPremium}, napiLimitOverride=${user.napiLimitOverride} -> érvényes limit=${user.isPremium ? "korlátlan (prémium)" : limit}`
+    );
+    return { isPremium: !!user.isPremium, limit };
+  } catch (error) {
+    console.error(
+      "❌ Hiba a felhasználó limit-adatainak lekérdezésekor (lehet, hogy a server.js Prisma Clientje elavult - próbáld: npx prisma generate, majd indítsd újra a szervert):",
+      error
+    );
+    return { isPremium: false, limit: ALAPERTELMEZETT_NAPI_LIMIT };
+  }
 }
 
 async function lekerdezMaiHasznalat(azonosito) {
@@ -111,7 +191,8 @@ async function lekerdezMaiHasznalat(azonosito) {
 
 // --- 1. FÜGGVÉNY: LIMIT NÖVELÉSE (EGYETLEN, IP ALAPÚ REKORDON, UPSERT-TEL) ---
 // Az email címet is elmentjük/frissítjük a rekordon (nem ez az azonosító kulcs,
-// csak kiegészítő infó, hogy lássuk ki áll a tiltás mögött).
+// csak kiegészítő infó, hogy lássuk ki áll a tiltás mögött, és hogy az admin
+// felület email alapján is meg tudja találni ezt a rekordot).
 async function noveldLimitet(email, ip) {
   const maiDatum = getMaiDatum();
   const azonosito = sajatAzonosito(ip);
@@ -143,7 +224,7 @@ async function noveldLimitet(email, ip) {
       });
     }
 
-    console.log(`💾 Limit mentve (IP alapján): ${azonosito} [${email || "nincs email"}] → ${friss.hasznalt}/${NAPI_LIMIT}`);
+    console.log(`💾 Limit mentve (IP alapján): ${azonosito} [${email || "nincs email"}] → ${friss.hasznalt}`);
   } catch (error) {
     console.error("Hiba a limit mentésekor:", error);
   }
@@ -266,19 +347,29 @@ io.on("connection", (socket) => {
     // A limit és a tiltás mostantól kizárólag az IP cím alapján történik –
     // ha valakit kitiltunk, azt az IP-je alapján tesszük, így új Google-fiókkal
     // sem tud visszatérni ugyanarról a gépről/hálózatról.
-    const JELENLEGI_HASZNALAT = await getLimitHasznalat(ujUser.ip);
+    //
+    // JAVÍTÁS: a limitet mostantól NEM a fix ALAPERTELMEZETT_NAPI_LIMIT
+    // konstansból vesszük, hanem lekérdezzük a felhasználóhoz tartozó,
+    // admin által esetlegesen felülírt egyedi limitet is - PRÉMIUM
+    // felhasználóknál pedig a limit-ellenőrzést teljesen kihagyjuk, ők
+    // korlátlanul párosíthatnak, függetlenül a napiLimitOverride-tól.
+    const { isPremium: SAJAT_PREMIUM, limit: SAJAT_LIMIT } = await lekerdezFelhasznaloLimitAdatok(ujUser.email);
 
-    if (JELENLEGI_HASZNALAT >= NAPI_LIMIT) {
-      const ujraindulasMs = ujraindulasMsAMaiNapVegeig();
+    if (!SAJAT_PREMIUM) {
+      const JELENLEGI_HASZNALAT = await getLimitHasznalat(ujUser.ip);
 
-      socket.emit("napi_limit_elerve", {
-        limit: NAPI_LIMIT,
-        hasznalt: JELENLEGI_HASZNALAT,
-        ujraindulasMs,
-        tipus: "fiokos",
-      });
-      console.log(`🚫 ${ujUser.nev} (${ujUser.email}) elszállt a limittel (${JELENLEGI_HASZNALAT}/${NAPI_LIMIT}).`);
-      return;
+      if (JELENLEGI_HASZNALAT >= SAJAT_LIMIT) {
+        const ujraindulasMs = ujraindulasMsAMaiNapVegeig();
+
+        socket.emit("napi_limit_elerve", {
+          limit: SAJAT_LIMIT,
+          hasznalt: JELENLEGI_HASZNALAT,
+          ujraindulasMs,
+          tipus: "fiokos",
+        });
+        console.log(`🚫 ${ujUser.nev} (${ujUser.email}) elszállt a limittel (${JELENLEGI_HASZNALAT}/${SAJAT_LIMIT}).`);
+        return;
+      }
     }
 
     if (socket.disconnected) {
