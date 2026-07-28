@@ -20,7 +20,8 @@ interface UserData {
   maiHasznalat?: number;
 }
 
-type Tab = "dashboard" | "users" | "admins" | "premium" | "reports" | "bans";
+type Tab = "dashboard" | "users" | "admins" | "premium" | "jelentesek";
+type ReportFilter = "osszes" | "fuggo" | "megoldott" | "elutasitott";
 
 export default function AdminVezerlokozpont() {
   const { data: session, status } = useSession();
@@ -28,6 +29,7 @@ export default function AdminVezerlokozpont() {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
 
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
+  const [reportFilter, setReportFilter] = useState<ReportFilter>("fuggo");
 
   const [users, setUsers] = useState<UserData[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
@@ -76,13 +78,11 @@ export default function AdminVezerlokozpont() {
       });
   };
 
-  // Első betöltés, amikor bármelyik felhasználó-alapú fülre lép
   useEffect(() => {
     const felhasznaloAlapuFul =
       activeTab === "users" ||
       activeTab === "admins" ||
-      activeTab === "premium" ||
-      activeTab === "bans";
+      activeTab === "premium";
 
     if (felhasznaloAlapuFul && isAdmin && !hasLoadedUsers) {
       betoltFelhasznalok();
@@ -114,7 +114,6 @@ export default function AdminVezerlokozpont() {
   const megjelenitettFelhasznalok = useMemo(() => {
     if (activeTab === "admins") return nevSzerintSzurt.filter((u) => u.isAdmin);
     if (activeTab === "premium") return nevSzerintSzurt.filter((u) => u.isPremium);
-    if (activeTab === "bans") return nevSzerintSzurt.filter((u) => u.isBanned);
     return nevSzerintSzurt;
   }, [activeTab, nevSzerintSzurt]);
 
@@ -132,7 +131,6 @@ export default function AdminVezerlokozpont() {
 
   const adminokSzama = users.filter((u) => u.isAdmin).length;
   const premiumSzama = users.filter((u) => u.isPremium).length;
-  const tiltottakSzama = users.filter((u) => u.isBanned).length;
 
   return (
     <main className="min-h-screen bg-[#0a0c11] text-white p-4 sm:p-8">
@@ -164,7 +162,7 @@ export default function AdminVezerlokozpont() {
           </div>
         </div>
 
-        {/* FÜLEK NAVIGÁCIÓ (ha nem a főmenüben vagyunk) */}
+        {/* FÜLEK NAVIGÁCIÓ */}
         {activeTab !== "dashboard" && (
           <div className="flex flex-wrap gap-2">
             {(
@@ -172,8 +170,7 @@ export default function AdminVezerlokozpont() {
                 { key: "users", label: "👥 Felhasználók" },
                 { key: "admins", label: "🛡️ Adminok" },
                 { key: "premium", label: "💎 Prémium" },
-                { key: "reports", label: "🚩 Reportok" },
-                { key: "bans", label: "🔨 Kitiltások" },
+                { key: "jelentesek", label: "🚩 Jelentések" },
               ] as { key: Tab; label: string }[]
             ).map((ful) => (
               <button
@@ -193,7 +190,7 @@ export default function AdminVezerlokozpont() {
 
         {/* FŐMENÜ KÁRTYÁK */}
         {activeTab === "dashboard" && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 animate-in fade-in duration-300">
             <div onClick={() => setActiveTab("users")} className="bg-[#12151c] p-6 rounded-3xl border border-white/5 hover:border-emerald-500/30 transition cursor-pointer group shadow-lg">
               <h2 className="text-xl font-bold text-white mb-2 group-hover:text-emerald-400 transition flex items-center gap-2">👥 Felhasználók</h2>
               <p className="text-gray-400 text-sm">Tagok kezelése, admin jog adása, IP-keresés, napi limitek állítása.</p>
@@ -206,19 +203,15 @@ export default function AdminVezerlokozpont() {
               <h2 className="text-xl font-bold text-white mb-2 group-hover:text-pink-400 transition flex items-center gap-2">💎 Prémium</h2>
               <p className="text-gray-400 text-sm">Prémium előfizetéssel rendelkező felhasználók listája.</p>
             </div>
-            <div onClick={() => setActiveTab("reports")} className="bg-[#12151c] p-6 rounded-3xl border border-white/5 hover:border-orange-500/30 transition cursor-pointer group shadow-lg">
-              <h2 className="text-xl font-bold text-white mb-2 group-hover:text-orange-400 transition flex items-center gap-2">🚩 Reportok</h2>
-              <p className="text-gray-400 text-sm">Felhasználói panaszok és jelentett beszélgetések elbírálása.</p>
-            </div>
-            <div onClick={() => setActiveTab("bans")} className="bg-[#12151c] p-6 rounded-3xl border border-white/5 hover:border-red-500/30 transition cursor-pointer group shadow-lg">
-              <h2 className="text-xl font-bold text-white mb-2 group-hover:text-red-400 transition flex items-center gap-2">🔨 Kitiltások</h2>
-              <p className="text-gray-400 text-sm">Bannolt felhasználók listája, tiltások feloldása.</p>
+            <div onClick={() => setActiveTab("jelentesek")} className="bg-[#12151c] p-6 rounded-3xl border border-white/5 hover:border-orange-500/30 transition cursor-pointer group shadow-lg">
+              <h2 className="text-xl font-bold text-white mb-2 group-hover:text-orange-400 transition flex items-center gap-2">🚩 Jelentések</h2>
+              <p className="text-gray-400 text-sm">Felhasználói panaszok és kitiltások együttes elbírálása.</p>
             </div>
           </div>
         )}
 
-        {/* FELHASZNÁLÓ-ALAPÚ NÉZETEK (users / admins / premium / bans) */}
-        {(activeTab === "users" || activeTab === "admins" || activeTab === "premium" || activeTab === "bans") && (
+        {/* FELHASZNÁLÓ-ALAPÚ NÉZETEK */}
+        {(activeTab === "users" || activeTab === "admins" || activeTab === "premium") && (
           <div className="bg-[#12151c] rounded-3xl border border-white/10 shadow-lg overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
             <div className="p-6 border-b border-white/10 flex flex-col gap-4">
               <div className="flex flex-wrap justify-between items-center gap-3">
@@ -226,7 +219,6 @@ export default function AdminVezerlokozpont() {
                   {activeTab === "users" && "Regisztrált Tagok Listája"}
                   {activeTab === "admins" && "Adminisztrátorok"}
                   {activeTab === "premium" && "Prémium Felhasználók"}
-                  {activeTab === "bans" && "Kitiltott Felhasználók"}
                 </h2>
                 <div className="flex gap-2 items-center">
                   {activeTab === "admins" && (
@@ -234,9 +226,6 @@ export default function AdminVezerlokozpont() {
                   )}
                   {activeTab === "premium" && (
                     <span className="bg-pink-500/10 text-pink-400 px-3 py-1 rounded-full text-xs font-semibold">{premiumSzama} prémium</span>
-                  )}
-                  {activeTab === "bans" && (
-                    <span className="bg-red-500/10 text-red-400 px-3 py-1 rounded-full text-xs font-semibold">{tiltottakSzama} kitiltva</span>
                   )}
                   {activeTab === "users" && (
                     <span className="bg-white/5 text-gray-300 px-3 py-1 rounded-full text-xs font-semibold">Összesen: {users.length} fő</span>
@@ -298,15 +287,14 @@ export default function AdminVezerlokozpont() {
                     <th className="px-6 py-4 font-semibold">IP cím</th>
                     <th className="px-6 py-4 font-semibold text-center">Napi limit</th>
                     <th className="px-6 py-4 font-semibold text-center">Státusz</th>
-                    {activeTab === "bans" && <th className="px-6 py-4 font-semibold">Tiltás</th>}
                     <th className="px-6 py-4 font-semibold text-right">Műveletek</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {isLoadingUsers ? (
-                    <tr><td colSpan={7} className="text-center py-8">Betöltés...</td></tr>
+                    <tr><td colSpan={6} className="text-center py-8">Betöltés...</td></tr>
                   ) : megjelenitettFelhasznalok.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-500">Nincs a szűrésnek megfelelő felhasználó.</td></tr>
+                    <tr><td colSpan={6} className="text-center py-8 text-gray-500">Nincs a szűrésnek megfelelő felhasználó.</td></tr>
                   ) : (
                     megjelenitettFelhasznalok.map((u) => (
                       <tr key={u.id} className="hover:bg-white/[0.02] transition">
@@ -343,16 +331,6 @@ export default function AdminVezerlokozpont() {
                             <span className="inline-block px-2 py-1 rounded bg-gray-500/10 text-gray-400 text-xs font-bold">ALAP</span>
                           )}
                         </td>
-                        {activeTab === "bans" && (
-                          <td className="px-6 py-4 text-xs">
-                            <div className="text-red-300">
-                              {u.bannedUntil
-                                ? `Eddig: ${new Date(u.bannedUntil).toLocaleString("hu-HU")}`
-                                : "Végleges tiltás"}
-                            </div>
-                            {u.banReason && <div className="text-gray-500 mt-1">{u.banReason}</div>}
-                          </td>
-                        )}
                         <td className="px-6 py-4 text-right">
                           <button
                             onClick={() => setManagingUser(u)}
@@ -370,10 +348,86 @@ export default function AdminVezerlokozpont() {
           </div>
         )}
 
-        {/* Placeholder a reportoknak */}
-        {activeTab === "reports" && (
-          <div className="bg-[#12151c] p-10 rounded-3xl border border-white/10 text-center text-gray-400">
-            Ez a modul még fejlesztés alatt áll.
+        {/* JELENTÉSEK FÜL */}
+        {activeTab === "jelentesek" && (
+          <div className="bg-[#12151c] rounded-3xl border border-white/10 shadow-lg overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+            <div className="p-6 border-b border-white/10 flex flex-col gap-6">
+              <div>
+                <h2 className="text-xl font-bold text-orange-400 mb-1">Jelentések Kezelése</h2>
+                <p className="text-sm text-gray-400">Tekintsd át a felhasználók által beküldött panaszokat és szabálysértéseket.</p>
+              </div>
+
+              {/* JELENTÉS AL-FÜLEK */}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setReportFilter("osszes")}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium border transition ${
+                    reportFilter === "osszes"
+                      ? "bg-white/10 border-white/30 text-white"
+                      : "bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  Összes jelentés
+                </button>
+                <button
+                  onClick={() => setReportFilter("fuggo")}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium border transition flex items-center gap-2 ${
+                    reportFilter === "fuggo"
+                      ? "bg-orange-500/10 border-orange-500/30 text-orange-400"
+                      : "bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-orange-500"></span> Függőben lévő
+                </button>
+                <button
+                  onClick={() => setReportFilter("megoldott")}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium border transition flex items-center gap-2 ${
+                    reportFilter === "megoldott"
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                      : "bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Megoldott
+                </button>
+                <button
+                  onClick={() => setReportFilter("elutasitott")}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium border transition flex items-center gap-2 ${
+                    reportFilter === "elutasitott"
+                      ? "bg-red-500/10 border-red-500/30 text-red-400"
+                      : "bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-red-500"></span> Elutasított
+                </button>
+              </div>
+            </div>
+
+            {/* JELENTÉS TÁBLÁZAT (Jelenleg statikus helykitöltő) */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-gray-300">
+                <thead className="bg-white/5 text-gray-400 uppercase text-xs">
+                  <tr>
+                    <th className="px-6 py-4 font-semibold">Dátum</th>
+                    <th className="px-6 py-4 font-semibold">Bejelentő</th>
+                    <th className="px-6 py-4 font-semibold">Jelentett személy</th>
+                    <th className="px-6 py-4 font-semibold">Ok / Kategória</th>
+                    <th className="px-6 py-4 font-semibold text-center">Státusz</th>
+                    <th className="px-6 py-4 font-semibold text-right">Műveletek</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  <tr>
+                    <td colSpan={6} className="text-center py-12 text-gray-500">
+                      <div className="flex flex-col items-center justify-center">
+                        <span className="text-3xl mb-2">📄</span>
+                        <p>Jelenleg nincsenek megjeleníthető jelentések ebben a kategóriában.</p>
+                        <p className="text-xs mt-1 text-gray-600">(Ez a funkció az adatbázis-kapcsolat kiépítésére vár)</p>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -465,7 +519,6 @@ function ManageUserModal({
 
         <div className="p-6 space-y-6">
 
-          {/* Admin / Prémium kapcsolók */}
           <div className="space-y-3">
             <label className="flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/10">
               <span className="text-sm font-medium">🛡️ Admin jog</span>
@@ -492,7 +545,6 @@ function ManageUserModal({
             </label>
           </div>
 
-          {/* Napi limit / Napi keret */}
           <div className="space-y-2">
             <h4 className="text-sm font-semibold text-gray-300">Napi limit &amp; keret</h4>
 
@@ -550,7 +602,6 @@ function ManageUserModal({
             </div>
           </div>
 
-          {/* Kitiltás */}
           <div className="space-y-3 pt-2 border-t border-white/10">
             <label className="flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/10">
               <span className="text-sm font-medium">🔨 Kitiltva</span>

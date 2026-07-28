@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 
+// A server.js-ben használt IP-tisztító logika lemásolása
+function tisztitottIp(ip: string | null | undefined) {
+  if (!ip) return null;
+  const tiszta = ip.split(",")[0].trim();
+  if (!tiszta || tiszta === "ismeretlen_ip") return null;
+  return `ip_${tiszta}`;
+}
+
 export async function GET(req: Request) {
   try {
     const session = await getServerSession();
@@ -26,8 +34,6 @@ export async function GET(req: Request) {
 
     let emailekIpAlapjan: string[] = [];
     if (ipKereses) {
-      // Megkeressük, mely NapiLimit rekordokhoz (IP-khez) tartozik ez a részlet,
-      // és kigyűjtjük a hozzájuk tartozó email címeket is.
       const talalatok = await prisma.napiLimit.findMany({
         where: { azonosito: { contains: ipKereses } },
         select: { email: true },
@@ -65,47 +71,52 @@ export async function GET(req: Request) {
       orderBy: { name: "asc" },
     });
 
-    // A mai napi limit-használat hozzáfűzése minden felhasználóhoz.
-    //
-    // FONTOS: a "datum" mezőt eredetileg egy Intl locale-formázás (hu-HU) hozza létre,
-    // ami eltérő Node/ICU build esetén LÁTHATATLANUL eltérő szóköz-karaktereket
-    // eredményezhet (pl. sima szóköz vs. keskeny nem-törő szóköz), emiatt egy egzakt
-    // SQL string-egyezés hibásan sosem találhat egyezést. Ezért itt nem az adatbázisra
-    // bízzuk a dátum-szűrést, hanem lekérjük az összes releváns sort, és kódban,
-    // a whitespace-t eltávolítva hasonlítjuk össze a mai nappal.
+    // 4. A mai nap pontos meghatározása a szűréshez
     const ma = new Date().toLocaleDateString("hu-HU", { timeZone: "Europe/Budapest" });
     const normalizalt = (s: string) => s.replace(/\s+/g, "");
     const maNormalizalt = normalizalt(ma);
 
-    const emailek = users.map((u) => u.email).filter((e): e is string => !!e);
+    // Kigyűjtjük az IP-azonosítókat és az emaileket is
+    const emailList = users.map((u) => u.email).filter(Boolean) as string[];
+    const ipAzonositok = users
+      .map((u) => tisztitottIp(u.lastIp))
+      .filter(Boolean) as string[];
 
-    // A NapiLimit rekordok "email" mezője alapján nézzük a mai használatot
-    // (az azonosito kulcs valójában IP-alapú, pl. "ip_::1", az email csak kísérő infó rajta).
-    const napiHasznalatokMind =
-      emailek.length > 0
-        ? await prisma.napiLimit.findMany({
-            where: { email: { in: emailek } },
-            select: { email: true, hasznalt: true, datum: true },
-          })
-        : [];
+    // 5. Lekérdezzük a limiteket mindkét (IP és email) szempont alapján
+    const napiHasznalatokMind = await prisma.napiLimit.findMany({
+      where: {
+        OR: [
+          { azonosito: { in: ipAzonositok } },
+          { email: { in: emailList } }
+        ]
+      },
+      select: { azonosito: true, email: true, hasznalt: true, datum: true },
+    });
 
-    const napiHasznalatok = napiHasznalatokMind.filter(
+    const napiHasznalatokMai = napiHasznalatokMind.filter(
       (nh) => normalizalt(nh.datum) === maNormalizalt
     );
 
-    // Math.max-ot használunk sum helyett, hogy ha egy felhasználóhoz több IP-s sor is
-    // tartozna ugyanarra a napra, ne adódjanak össze hibásan, hanem a magasabb értéket lássuk.
-    const hasznalatMap = new Map<string, number>();
-    for (const nh of napiHasznalatok) {
-      if (!nh.email) continue;
-      const eddigi = hasznalatMap.get(nh.email) ?? 0;
-      hasznalatMap.set(nh.email, Math.max(eddigi, nh.hasznalt));
-    }
+    // 6. Összesítjük az eredményeket a felhasználókhoz
+    const kiegeszitve = users.map((u) => {
+      let maxHasznalt = 0;
+      const sajatIpAzonosito = tisztitottIp(u.lastIp);
 
-    const kiegeszitve = users.map((u) => ({
-      ...u,
-      maiHasznalat: u.email ? hasznalatMap.get(u.email) || 0 : 0,
-    }));
+      for (const nh of napiHasznalatokMai) {
+        // Ha egyezik az IP, VAGY egyezik az email, akkor figyelembe vesszük
+        const egyezikAzonosito = sajatIpAzonosito && nh.azonosito === sajatIpAzonosito;
+        const egyezikEmail = u.email && nh.email && nh.email.toLowerCase() === u.email.toLowerCase();
+
+        if (egyezikAzonosito || egyezikEmail) {
+          maxHasznalt = Math.max(maxHasznalt, nh.hasznalt);
+        }
+      }
+
+      return {
+        ...u,
+        maiHasznalat: maxHasznalt,
+      };
+    });
 
     return NextResponse.json(kiegeszitve);
   } catch (error) {
