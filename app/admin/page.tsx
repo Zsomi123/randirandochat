@@ -20,9 +20,25 @@ interface UserData {
   maiHasznalat?: number;
 }
 
-type Tab = "dashboard" | "users" | "admins" | "premium" | "jelentesek";
+type Tab = "dashboard" | "users" | "admins" | "premium" | "jelentesek" | "fellebbezesek";
 type ReportStatus = "fuggo" | "folyamatban" | "megoldott" | "elutasitott";
 type ReportFilter = "osszes" | ReportStatus;
+
+// ÚJ: Fellebbezés (ban appeal) adattípus, ahogy a /api/admin/appeals route.ts visszaadja
+type FellebbezesStatus = "fuggo" | "elfogadva" | "elutasitva";
+interface FellebbezesAdat {
+  id: string;
+  datum: string;
+  userEmail: string;
+  userNev: string;
+  uzenet: string;
+  bannedUntil: string | null;
+  banReason: string | null;
+  statusz: FellebbezesStatus;
+  adminValasz: string | null;
+  elbiraloEmail: string | null;
+  elbiraltIdo: string | null;
+}
 
 // Valós jelentés-adat típusa, ahogy a /api/admin/reports route.ts visszaadja
 interface JelentesAdat {
@@ -64,6 +80,13 @@ export default function AdminVezerlokozpont() {
   const [hasLoadedReports, setHasLoadedReports] = useState(false);
 
   const [selectedReport, setSelectedReport] = useState<JelentesAdat | null>(null);
+
+  // --- ÚJ: FELLEBBEZÉSEK (ban appeal) ÁLLAPOTOK ---
+  const [fellebbezesFilter, setFellebbezesFilter] = useState<"osszes" | FellebbezesStatus>("fuggo");
+  const [fellebbezesek, setFellebbezesek] = useState<FellebbezesAdat[]>([]);
+  const [isLoadingFellebbezesek, setIsLoadingFellebbezesek] = useState(false);
+  const [hasLoadedFellebbezesek, setHasLoadedFellebbezesek] = useState(false);
+  const [selectedFellebbezes, setSelectedFellebbezes] = useState<FellebbezesAdat | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -141,6 +164,32 @@ export default function AdminVezerlokozpont() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, hasLoadedReports]);
 
+  const betoltFellebbezesek = () => {
+    setIsLoadingFellebbezesek(true);
+    fetch("/api/admin/appeals")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setFellebbezesek(data);
+          setHasLoadedFellebbezesek(true);
+        }
+        setIsLoadingFellebbezesek(false);
+      })
+      .catch((err) => {
+        console.error("Hiba a fellebbezések lekérésekor", err);
+        setIsLoadingFellebbezesek(false);
+      });
+  };
+
+  // A fellebbezéseket is már admin-jogosultság megerősítésekor betöltjük, hogy
+  // a főmenü kártyáján és a fül címkéjén a "függőben lévő" jelvény azonnal pontos legyen.
+  useEffect(() => {
+    if (isAdmin && !hasLoadedFellebbezesek) {
+      betoltFellebbezesek();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, hasLoadedFellebbezesek]);
+
   const handleIpKereses = () => {
     setIpKeresesFolyamatban(true);
     betoltFelhasznalok(ipKereses.trim() || undefined);
@@ -177,6 +226,11 @@ export default function AdminVezerlokozpont() {
     return reports.filter((r) => r.statusz === reportFilter);
   }, [reports, reportFilter]);
 
+  const filteredFellebbezesek = useMemo(() => {
+    if (fellebbezesFilter === "osszes") return fellebbezesek;
+    return fellebbezesek.filter((f) => f.statusz === fellebbezesFilter);
+  }, [fellebbezesek, fellebbezesFilter]);
+
   if (status === "loading" || isAdmin === null) {
     return (
       <main className="min-h-screen bg-[#0a0c11] flex items-center justify-center text-gray-400">
@@ -188,6 +242,7 @@ export default function AdminVezerlokozpont() {
   const adminokSzama = users.filter((u) => u.isAdmin).length;
   const premiumSzama = users.filter((u) => u.isPremium).length;
   const fuggoJelentesekSzama = reports.filter((r) => r.statusz === "fuggo").length;
+  const fuggoFellebbezesekSzama = fellebbezesek.filter((f) => f.statusz === "fuggo").length;
 
   return (
     <main className="min-h-screen bg-[#0a0c11] text-white p-4 sm:p-8">
@@ -228,6 +283,7 @@ export default function AdminVezerlokozpont() {
                 { key: "admins", label: "🛡️ Adminok" },
                 { key: "premium", label: "💎 Prémium" },
                 { key: "jelentesek", label: `🚩 Jelentések ${fuggoJelentesekSzama > 0 ? `(${fuggoJelentesekSzama})` : ""}` },
+                { key: "fellebbezesek", label: `📩 Fellebbezések ${fuggoFellebbezesekSzama > 0 ? `(${fuggoFellebbezesekSzama})` : ""}` },
               ] as { key: Tab; label: string }[]
             ).map((ful) => (
               <button
@@ -268,6 +324,15 @@ export default function AdminVezerlokozpont() {
               )}
               <h2 className="text-xl font-bold text-white mb-2 group-hover:text-orange-400 transition flex items-center gap-2">🚩 Jelentések</h2>
               <p className="text-gray-400 text-sm">Felhasználói panaszok és kitiltások együttes elbírálása.</p>
+            </div>
+            <div onClick={() => setActiveTab("fellebbezesek")} className="bg-[#12151c] p-6 rounded-3xl border border-white/5 hover:border-indigo-500/30 transition cursor-pointer group shadow-lg relative">
+              {fuggoFellebbezesekSzama > 0 && (
+                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full animate-pulse shadow-lg">
+                  {fuggoFellebbezesekSzama} ÚJ
+                </span>
+              )}
+              <h2 className="text-xl font-bold text-white mb-2 group-hover:text-indigo-400 transition flex items-center gap-2">📩 Fellebbezések</h2>
+              <p className="text-gray-400 text-sm">Prémium tagok kitiltás elleni fellebbezéseinek elbírálása.</p>
             </div>
           </div>
         )}
@@ -502,6 +567,84 @@ export default function AdminVezerlokozpont() {
           </div>
         )}
 
+        {/* FELLEBBEZÉSEK FÜL */}
+        {activeTab === "fellebbezesek" && (
+          <div className="bg-[#12151c] rounded-3xl border border-white/10 shadow-lg overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+            <div className="p-6 border-b border-white/10 flex flex-col gap-6">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h2 className="text-xl font-bold text-indigo-400 mb-1">Fellebbezések Kezelése</h2>
+                  <p className="text-sm text-gray-400">Prémium felhasználók kitiltás elleni fellebbezései.</p>
+                </div>
+                <button
+                  onClick={betoltFellebbezesek}
+                  className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs transition shrink-0"
+                >
+                  ⟳ Frissítés
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setFellebbezesFilter("osszes")} className={`px-4 py-2 rounded-xl text-sm font-medium border transition ${fellebbezesFilter === "osszes" ? "bg-white/10 border-white/30 text-white" : "bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white"}`}>Összes</button>
+                <button onClick={() => setFellebbezesFilter("fuggo")} className={`px-4 py-2 rounded-xl text-sm font-medium border transition flex items-center gap-2 ${fellebbezesFilter === "fuggo" ? "bg-orange-500/10 border-orange-500/30 text-orange-400" : "bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white"}`}>
+                  <span className="w-2 h-2 rounded-full bg-orange-500"></span> Függőben lévő
+                </button>
+                <button onClick={() => setFellebbezesFilter("elfogadva")} className={`px-4 py-2 rounded-xl text-sm font-medium border transition flex items-center gap-2 ${fellebbezesFilter === "elfogadva" ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white"}`}>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Elfogadva
+                </button>
+                <button onClick={() => setFellebbezesFilter("elutasitva")} className={`px-4 py-2 rounded-xl text-sm font-medium border transition flex items-center gap-2 ${fellebbezesFilter === "elutasitva" ? "bg-red-500/10 border-red-500/30 text-red-400" : "bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white"}`}>
+                  <span className="w-2 h-2 rounded-full bg-red-500"></span> Elutasítva
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-gray-300">
+                <thead className="bg-white/5 text-gray-400 uppercase text-xs">
+                  <tr>
+                    <th className="px-6 py-4 font-semibold">Dátum</th>
+                    <th className="px-6 py-4 font-semibold">Felhasználó</th>
+                    <th className="px-6 py-4 font-semibold">Fellebbezés szövege</th>
+                    <th className="px-6 py-4 font-semibold text-center">Státusz</th>
+                    <th className="px-6 py-4 font-semibold text-right">Műveletek</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {isLoadingFellebbezesek ? (
+                    <tr><td colSpan={5} className="text-center py-12 text-gray-500">Betöltés...</td></tr>
+                  ) : filteredFellebbezesek.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-12 text-gray-500">Nincs a szűrésnek megfelelő fellebbezés.</td></tr>
+                  ) : (
+                    filteredFellebbezesek.map((f) => (
+                      <tr key={f.id} className="hover:bg-white/[0.02] transition">
+                        <td className="px-6 py-4 text-xs text-gray-500">{f.datum}</td>
+                        <td className="px-6 py-4">
+                          <div className="text-white">{f.userNev}</div>
+                          <div className="text-xs text-gray-500">{f.userEmail}</div>
+                        </td>
+                        <td className="px-6 py-4 max-w-sm truncate text-gray-300" title={f.uzenet}>{f.uzenet}</td>
+                        <td className="px-6 py-4 text-center">
+                          {f.statusz === "fuggo" && <span className="bg-orange-500/10 text-orange-400 px-2 py-1 rounded text-xs font-bold">FÜGGŐBEN</span>}
+                          {f.statusz === "elfogadva" && <span className="bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded text-xs font-bold">ELFOGADVA</span>}
+                          {f.statusz === "elutasitva" && <span className="bg-red-500/10 text-red-400 px-2 py-1 rounded text-xs font-bold">ELUTASÍTVA</span>}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            onClick={() => setSelectedFellebbezes(f)}
+                            className="px-4 py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 text-indigo-400 text-xs font-medium transition"
+                          >
+                            Elbírálás
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {managingUser && (
@@ -523,6 +666,23 @@ export default function AdminVezerlokozpont() {
           onUpdated={(updated) => {
             setReports((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
             setSelectedReport(null);
+            // ÚJ: ha a "Későbbre hagyom" gombbal folyamatban-ra tettük a
+            // jelentést, a lista automatikusan a "Folyamatban" fülre vált,
+            // hogy az admin lássa, hova került.
+            if (updated.statusz === "folyamatban") {
+              setReportFilter("folyamatban");
+            }
+          }}
+        />
+      )}
+
+      {selectedFellebbezes && (
+        <AppealDetailsModal
+          fellebbezes={selectedFellebbezes}
+          onClose={() => setSelectedFellebbezes(null)}
+          onUpdated={(updated) => {
+            setFellebbezesek((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+            setSelectedFellebbezes(null);
           }}
         />
       )}
@@ -644,6 +804,32 @@ function ReportDetailsModal({
     } catch (err) {
       console.error(err);
       setHiba("Szerver hiba történt az elutasítás közben.");
+      setKuldesFolyamatban(false);
+    }
+  };
+
+  // ÚJ: "Későbbre hagyom" - a jelentést nem zárjuk le, csak "folyamatban"
+  // állapotba tesszük, hogy ne vesszen el, és később a "Folyamatban" fülön
+  // könnyen visszatalálja az admin.
+  const handleHalasztas = async () => {
+    setKuldesFolyamatban(true);
+    setHiba(null);
+    try {
+      const res = await fetch(`/api/admin/reports/${report.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "halasztas" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setHiba(data.error || "Ismeretlen hiba történt.");
+        setKuldesFolyamatban(false);
+        return;
+      }
+      onUpdated(data);
+    } catch (err) {
+      console.error(err);
+      setHiba("Szerver hiba történt a halasztás közben.");
       setKuldesFolyamatban(false);
     }
   };
@@ -868,11 +1054,11 @@ function ReportDetailsModal({
           {/* Alsó gombsor */}
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-2 pt-4 border-t border-white/5">
             <button
-              onClick={onClose}
+              onClick={handleHalasztas}
               disabled={kuldesFolyamatban}
               className="text-gray-400 hover:text-white text-sm transition font-medium disabled:opacity-50"
             >
-              Későbbre hagyom (Ablak bezárása)
+              {kuldesFolyamatban ? "Feldolgozás..." : "Későbbre hagyom (Ablak bezárása)"}
             </button>
 
             <div className="flex gap-3 w-full sm:w-auto">
@@ -894,6 +1080,140 @@ function ReportDetailsModal({
           </div>
         </div>
 
+      </div>
+    </div>
+  );
+}
+
+// --- KOMPONENS: FELLEBBEZÉS ELBÍRÁLÁSA ---
+function AppealDetailsModal({
+  fellebbezes,
+  onClose,
+  onUpdated,
+}: {
+  fellebbezes: FellebbezesAdat;
+  onClose: () => void;
+  onUpdated: (updated: FellebbezesAdat) => void;
+}) {
+  const [valasz, setValasz] = useState("");
+  const [kuldesFolyamatban, setKuldesFolyamatban] = useState(false);
+  const [hiba, setHiba] = useState<string | null>(null);
+
+  const dontes = async (action: "elfogad" | "elutasit") => {
+    setKuldesFolyamatban(true);
+    setHiba(null);
+    try {
+      const res = await fetch(`/api/admin/appeals/${fellebbezes.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, valasz: valasz.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setHiba(data.error || "Ismeretlen hiba történt.");
+        setKuldesFolyamatban(false);
+        return;
+      }
+      onUpdated(data);
+    } catch (err) {
+      console.error(err);
+      setHiba("Szerver hiba történt az elbírálás közben.");
+      setKuldesFolyamatban(false);
+    }
+  };
+
+  const mar_elbiralt = fellebbezes.statusz !== "fuggo";
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="bg-[#12151c] border border-white/10 rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-white/10 flex justify-between items-center">
+          <div>
+            <h3 className="text-lg font-bold text-white">{fellebbezes.userNev}</h3>
+            <p className="text-xs text-gray-500">{fellebbezes.userEmail} • {fellebbezes.datum}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl leading-none">✕</button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          <div className="bg-white/5 rounded-xl p-4 border border-white/10 space-y-2">
+            <p className="text-sm text-gray-300">
+              <span className="text-gray-500">Tiltás oka: </span>
+              <span className="text-white">{fellebbezes.banReason || "Nincs megadva"}</span>
+            </p>
+            <p className="text-sm text-gray-300">
+              <span className="text-gray-500">Tiltás vége: </span>
+              <span className="text-white">
+                {fellebbezes.bannedUntil
+                  ? new Date(fellebbezes.bannedUntil).toLocaleString("hu-HU", { timeZone: "Europe/Budapest" })
+                  : "Végleges"}
+              </span>
+            </p>
+          </div>
+
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">A felhasználó fellebbezése</h4>
+            <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 text-sm text-gray-200 whitespace-pre-wrap">
+              {fellebbezes.uzenet}
+            </div>
+          </div>
+
+          {mar_elbiralt ? (
+            <div className="space-y-2">
+              <div
+                className={`inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                  fellebbezes.statusz === "elfogadva"
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : "bg-red-500/10 text-red-400 border border-red-500/20"
+                }`}
+              >
+                {fellebbezes.statusz === "elfogadva" ? "Elfogadva" : "Elutasítva"}
+              </div>
+              {fellebbezes.adminValasz && (
+                <p className="text-sm text-gray-400">
+                  Admin válasza: <span className="text-white">{fellebbezes.adminValasz}</span>
+                </p>
+              )}
+              <p className="text-xs text-gray-500">Elbírálta: {fellebbezes.elbiraloEmail} ({fellebbezes.elbiraltIdo})</p>
+            </div>
+          ) : (
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">Válasz a felhasználónak (opcionális)</label>
+              <textarea
+                value={valasz}
+                onChange={(e) => setValasz(e.target.value)}
+                rows={2}
+                placeholder="Pl. Átnéztük az esetet és..."
+                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm placeholder:text-gray-500 focus:outline-none focus:border-indigo-500/40 resize-none"
+              />
+            </div>
+          )}
+
+          {hiba && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">
+              {hiba}
+            </div>
+          )}
+        </div>
+
+        {!mar_elbiralt && (
+          <div className="p-6 border-t border-white/10 flex gap-3 justify-end">
+            <button
+              onClick={() => dontes("elutasit")}
+              disabled={kuldesFolyamatban}
+              className="px-5 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-sm font-bold transition disabled:opacity-50"
+            >
+              Elutasítás
+            </button>
+            <button
+              onClick={() => dontes("elfogad")}
+              disabled={kuldesFolyamatban}
+              className="px-5 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 text-sm font-bold transition disabled:opacity-50"
+            >
+              {kuldesFolyamatban ? "Feldolgozás..." : "Elfogadás (tiltás feloldása)"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

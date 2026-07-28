@@ -4,9 +4,24 @@ import { prisma } from "@/lib/prisma";
 
 const ALAPERTELMEZETT_NAPI_LIMIT = 20;
 
+// Ugyanaz a beszélgetés-üzenet típus, amit a jelentés (Report) chatLog mezője tárol.
+type ChatUzenet = { felado: "en" | "partner" | "rendszer"; szoveg: string; ido: number };
+
 // Segédfüggvény a mai dátumhoz (magyar időzóna szerint)
 function getMaiDatum() {
   return new Date().toLocaleDateString("hu-HU", { timeZone: "Europe/Budapest" });
+}
+
+function idoFormazas(ts: number) {
+  return new Date(ts).toLocaleTimeString("hu-HU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Budapest",
+  });
+}
+
+function datumFormazas(d: Date) {
+  return d.toLocaleString("hu-HU", { timeZone: "Europe/Budapest" });
 }
 
 // JAVÍTÁS: a server.js-ben már eddig is volt egy hasonló tisztítófüggvény
@@ -101,6 +116,58 @@ export async function GET(req: Request) {
     // napiLimit mező null - ez jelenti a frontend felé, hogy korlátlan.
     const hatralevoLimit = user.isPremium ? null : Math.max(0, maxNapiLimit - tenylegesenHasznalt);
 
+    // 4. HA A FELHASZNÁLÓ KI VAN TILTVA: kikeressük azt a jelentést, ami miatt
+    // a szankció megtörtént, hogy a profil oldalon megjeleníthető legyen az OK
+    // (a beszélgetés, ami miatt kibannolták), ne csak a puszta banReason szöveg.
+    let tiltasReszletek: {
+      okok: string;
+      datum: string;
+      chatLog: { felado: string; sajat: boolean; ido: string; szoveg: string }[];
+    } | null = null;
+
+    if (user.isBanned) {
+      const okotOkozoJelentes = await prisma.report.findFirst({
+        where: { targetEmail: session.user.email, celpontSzankcioAlkalmazva: true },
+        orderBy: { elbiraltIdo: "desc" },
+      });
+
+      if (okotOkozoJelentes) {
+        const chatLog = Array.isArray(okotOkozoJelentes.chatLog)
+          ? (okotOkozoJelentes.chatLog as unknown as ChatUzenet[])
+          : [];
+
+        tiltasReszletek = {
+          okok: okotOkozoJelentes.okok.length > 0 ? okotOkozoJelentes.okok.join(", ") : "Nincs megadva",
+          datum: okotOkozoJelentes.elbiraltIdo ? datumFormazas(okotOkozoJelentes.elbiraltIdo) : "",
+          // A felhasználó szemszögéből: az ő saját üzenetei a "partner" felado
+          // alatt vannak elmentve (ő volt a jelentés célpontja).
+          chatLog: chatLog
+            .filter((u) => u.felado !== "rendszer")
+            .map((u) => ({
+              felado: u.felado === "partner" ? "Te" : "Beszélgetőpartnered",
+              sajat: u.felado === "partner",
+              ido: idoFormazas(u.ido),
+              szoveg: u.szoveg,
+            })),
+        };
+      }
+    }
+
+    // 5. FELLEBBEZÉS ÁLLAPOTA (ha nyújtott már be egyet) - a legutóbbit vesszük figyelembe.
+    const legutobbiFellebbezes = await prisma.fellebbezes.findFirst({
+      where: { userEmail: session.user.email },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const fellebbezesAllapot = legutobbiFellebbezes
+      ? {
+          statusz: legutobbiFellebbezes.statusz,
+          uzenet: legutobbiFellebbezes.uzenet,
+          adminValasz: legutobbiFellebbezes.adminValasz,
+          datum: datumFormazas(legutobbiFellebbezes.createdAt),
+        }
+      : null;
+
     return NextResponse.json({
       becenev: user.becenev,
       kor: user.kor,
@@ -116,6 +183,10 @@ export async function GET(req: Request) {
       isBanned: user.isBanned,
       bannedUntil: user.bannedUntil,
       banReason: user.banReason,
+      // ÚJ: a kitiltáshoz vezető jelentés/beszélgetés (ha van) - a profil oldal ezt jeleníti meg indoklásként
+      tiltasReszletek,
+      // ÚJ: a legutóbb beadott fellebbezés állapota (null, ha még sosem fellebbezett)
+      fellebbezesAllapot,
       // null = korlátlan (prémium), szám = hátralévő ingyenes párosítások mára
       napiLimit: hatralevoLimit
     });

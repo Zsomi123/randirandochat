@@ -22,6 +22,29 @@ function datumFormazas(d: Date) {
   return d.toLocaleString("hu-HU", { timeZone: "Europe/Budapest" });
 }
 
+// Ugyanaz az IP-tisztító logika, mint a server.js-ben és a többi admin route-ban.
+function tisztitottIp(ip: string | null | undefined) {
+  if (!ip) return null;
+  const tiszta = ip.split(",")[0].trim();
+  if (!tiszta || tiszta === "ismeretlen_ip") return null;
+  return tiszta;
+}
+
+// ÚJ: EGY FELHASZNÁLÓ (email alapján) UTOLSÓ ISMERT IP-CÍMÉNEK KITILTÁSA IS,
+// nem csak a fiókjáé - így egy új Google-fiók regisztrálása nem kerüli meg a
+// szankciót (lásd server.js ellenorizIpTiltas).
+async function tiltsdKiIpCimetIs(email: string, lejarat: Date | null, indoklas: string | null) {
+  const felhasznalo = await prisma.user.findUnique({ where: { email }, select: { lastIp: true } });
+  const ip = tisztitottIp(felhasznalo?.lastIp);
+  if (!ip) return;
+
+  await prisma.bannedIp.upsert({
+    where: { ip },
+    update: { bannedUntil: lejarat, reason: indoklas, sourceEmail: email },
+    create: { ip, bannedUntil: lejarat, reason: indoklas, sourceEmail: email },
+  });
+}
+
 async function ellenorizAdmin() {
   const session = await getServerSession();
   if (!session || !session.user?.email) return null;
@@ -122,6 +145,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             banReason: celpont.reason || null,
           },
         });
+        // ÚJ: az IP-je is tiltólistára kerül, hogy új fiókkal se tudjon visszatérni.
+        await tiltsdKiIpCimetIs(report.targetEmail, lejarat, celpont.reason || null);
         reportUpdateData.celpontSzankcioIndoklas = celpont.reason || null;
         reportUpdateData.celpontSzankcioLejarat = lejarat;
         reportUpdateData.celpontSzankcioAlkalmazva = true;
@@ -138,6 +163,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             banReason: bejelento.reason || null,
           },
         });
+        // ÚJ: az IP-je is tiltólistára kerül, hogy új fiókkal se tudjon visszatérni.
+        await tiltsdKiIpCimetIs(report.reporterEmail, lejarat, bejelento.reason || null);
         reportUpdateData.bejelentoSzankcioIndoklas = bejelento.reason || null;
         reportUpdateData.bejelentoSzankcioLejarat = lejarat;
         reportUpdateData.bejelentoSzankcioAlkalmazva = true;
@@ -146,6 +173,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       updatedReport = await prisma.report.update({
         where: { id },
         data: reportUpdateData,
+      });
+    } else if (body.action === "halasztas") {
+      // ÚJ: az admin felület "Későbbre hagyom (Ablak bezárása)" gombja - a
+      // jelentést nem zárjuk le végleg, csak "folyamatban" állapotba tesszük,
+      // hogy a Jelentések fülön a "Folyamatban" szűrő alatt megtalálja később.
+      updatedReport = await prisma.report.update({
+        where: { id },
+        data: {
+          statusz: "folyamatban",
+          elbiraloEmail: admin.email,
+        },
       });
     } else {
       return NextResponse.json({ error: "Ismeretlen művelet." }, { status: 400 });

@@ -32,6 +32,28 @@ function tisztitottIp(ip: string | null | undefined) {
   return tiszta;
 }
 
+// ÚJ: a User.isBanned mellett a hozzá tartozó (utolsó ismert) IP címet is
+// szinkronban tartjuk a BannedIp táblával, hogy a tiltás ne csak a fiókra,
+// hanem a hálózatra/gépre is érvényesüljön (lásd server.js ellenorizIpTiltas).
+async function szinkronizaldIpTiltast(
+  ip: string | null,
+  isBanned: boolean,
+  bannedUntil: Date | null,
+  banReason: string | null,
+  email: string | null
+) {
+  if (!ip) return;
+  if (isBanned) {
+    await prisma.bannedIp.upsert({
+      where: { ip },
+      update: { bannedUntil, reason: banReason, sourceEmail: email || undefined },
+      create: { ip, bannedUntil, reason: banReason, sourceEmail: email || null },
+    });
+  } else {
+    await prisma.bannedIp.deleteMany({ where: { ip } });
+  }
+}
+
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -103,6 +125,18 @@ export async function PATCH(
         lastIp: true,
       },
     });
+
+    // ÚJ: ha ebben a kérésben változott a tiltás állapota, az utolsó ismert
+    // IP-címét is szinkronba hozzuk a BannedIp táblával.
+    if (typeof body.isBanned === "boolean") {
+      await szinkronizaldIpTiltast(
+        tisztitottIp(updated.lastIp),
+        updated.isBanned,
+        updated.bannedUntil,
+        updated.banReason,
+        updated.email
+      );
+    }
 
     // A mai napi limit-használat kezelése: vagy nullázás (resetTodayUsage), vagy
     // egy konkrét, admin által megadott érték beállítása (setTodayUsage).

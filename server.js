@@ -205,6 +205,33 @@ async function ellenorizTiltas(email) {
   }
 }
 
+// ÚJ: A FELHASZNÁLÓ IP CÍMÉNEK KITILTÁS-ÁLLAPOTÁNAK LEKÉRDEZÉSE ---
+// Ugyanaz, mint az ellenorizTiltas, csak a BannedIp táblán, tisztított
+// (ip_ előtag nélküli) IP cím alapján. Ez teszi lehetővé, hogy valakit ne
+// csak a fiókján (email), hanem a hálózatán/gépén keresztül is ki lehessen
+// tiltani - így egy új Google-fiók regisztrálása sem kerüli meg a tiltást.
+// Egy lejárt (bannedUntil a múltban van) IP-tiltást már nem veszünk figyelembe.
+async function ellenorizIpTiltas(nyersIp) {
+  const ip = nyersIpTisztitasa(nyersIp);
+  if (!ip || ip === "ismeretlen_ip") return { tiltva: false };
+  try {
+    const rekord = await prisma.bannedIp.findUnique({ where: { ip } });
+    if (!rekord) return { tiltva: false };
+
+    if (rekord.bannedUntil && rekord.bannedUntil.getTime() <= Date.now()) {
+      return { tiltva: false };
+    }
+
+    return { tiltva: true, bannedUntil: rekord.bannedUntil, banReason: rekord.reason };
+  } catch (error) {
+    console.error(
+      "❌ Hiba az IP-tiltás ellenőrzésekor (lehet, hogy a server.js Prisma Clientje elavult - próbáld: npx prisma generate, majd indítsd újra a szervert):",
+      error
+    );
+    return { tiltva: false };
+  }
+}
+
 async function lekerdezMaiHasznalat(azonosito) {
   if (!azonosito) return 0;
   try {
@@ -368,14 +395,37 @@ io.on("connection", (socket) => {
     }
 
     // ÚJ: KITILTÁS ELLENŐRZÉSE – a kitiltott (isBanned=true, és a bannedUntil
-    // még nem járt le) felhasználók nem állhatnak sorba párosításra.
-    const tiltasAllapot = await ellenorizTiltas(email);
-    if (tiltasAllapot.tiltva) {
+    // még nem járt le) felhasználók nem állhatnak sorba párosításra. MOSTANTÓL
+    // nemcsak a fiók (email), hanem az IP cím alapján is nézzük a tiltást, hogy
+    // egy új Google-fiók regisztrálásával se lehessen megkerülni a kitiltást.
+    const [emailTiltas, ipTiltas] = await Promise.all([
+      ellenorizTiltas(email),
+      ellenorizIpTiltas(clientIp),
+    ]);
+
+    if (emailTiltas.tiltva || ipTiltas.tiltva) {
+      // Ha bármelyik forrás végleges (bannedUntil = null), a végleges tiltás
+      // érvényesül. Egyébként a később lejáró dátumot vesszük figyelembe.
+      let vegsoBannedUntil;
+      if (
+        (emailTiltas.tiltva && !emailTiltas.bannedUntil) ||
+        (ipTiltas.tiltva && !ipTiltas.bannedUntil)
+      ) {
+        vegsoBannedUntil = null;
+      } else {
+        const datumok = [emailTiltas.bannedUntil, ipTiltas.bannedUntil].filter(Boolean);
+        vegsoBannedUntil = datumok.length
+          ? new Date(Math.max(...datumok.map((d) => d.getTime())))
+          : null;
+      }
+
+      const vegsoIndoklas = emailTiltas.banReason || ipTiltas.banReason || null;
+
       socket.emit("kitiltva", {
-        bannedUntil: tiltasAllapot.bannedUntil,
-        indoklas: tiltasAllapot.banReason,
+        bannedUntil: vegsoBannedUntil,
+        indoklas: vegsoIndoklas,
       });
-      console.log(`🚫 ${email} kitiltott felhasználó próbált párosítani – elutasítva.`);
+      console.log(`🚫 ${email} (IP: ${clientIp}) kitiltott felhasználó/IP próbált párosítani – elutasítva.`);
       return;
     }
 
