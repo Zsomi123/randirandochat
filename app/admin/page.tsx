@@ -24,8 +24,8 @@ type Tab = "dashboard" | "users" | "admins" | "premium" | "jelentesek";
 type ReportStatus = "fuggo" | "folyamatban" | "megoldott" | "elutasitott";
 type ReportFilter = "osszes" | ReportStatus;
 
-// Ideiglenes típus a tesztadatokhoz
-interface MockReport {
+// Valós jelentés-adat típusa, ahogy a /api/admin/reports route.ts visszaadja
+interface JelentesAdat {
   id: string;
   datum: string;
   bejelentoNev: string;
@@ -40,65 +40,6 @@ interface MockReport {
     korabbiTiltasok: { datum: string; ok: string }[];
   };
 }
-
-// --- TESZTADATOK A JELENTÉSEKHEZ ---
-const MOCK_REPORTS: MockReport[] = [
-  {
-    id: "REP-1042",
-    datum: "2026. 07. 28. 14:12",
-    bejelentoNev: "GamerLany99",
-    bejelentoEmail: "gamer@example.com",
-    bejelentoEloelet: { helyes: 5, alaptalan: 0 },
-    celpontNev: "TrollKirály",
-    celpontEmail: "troll22@example.com",
-    ok: "Extrém káromkodás / Zaklatás",
-    statusz: "fuggo",
-    celpontEloelet: {
-      korabbiTiltasok: [
-        { datum: "2026. 06. 15.", ok: "Súlyos káromkodás a chaten" }
-      ]
-    },
-    chatLog: [
-      { felado: "GamerLany99", ido: "14:10", szoveg: "Szia! Honnan írsz?", isTarget: false },
-      { felado: "TrollKirály", ido: "14:10", szoveg: "Közöd te n**mérgezett k**va??", isTarget: true },
-      { felado: "GamerLany99", ido: "14:11", szoveg: "Ezt most miért kellett? Tiltalak.", isTarget: false },
-      { felado: "TrollKirály", ido: "14:11", szoveg: "Dögölj meg lol", isTarget: true },
-    ]
-  },
-  {
-    id: "REP-1043",
-    datum: "2026. 07. 28. 10:05",
-    bejelentoNev: "RendesSrác",
-    bejelentoEmail: "rendes@example.com",
-    bejelentoEloelet: { helyes: 1, alaptalan: 4 },
-    celpontNev: "CukiLány",
-    celpontEmail: "cuki@example.com",
-    ok: "Spam / Bot gyanú",
-    statusz: "fuggo",
-    celpontEloelet: { korabbiTiltasok: [] },
-    chatLog: [
-      { felado: "RendesSrác", ido: "10:01", szoveg: "Szia, mizu?", isTarget: false },
-      { felado: "CukiLány", ido: "10:03", szoveg: "Szia, semmi külön, veled?", isTarget: true },
-      { felado: "RendesSrác", ido: "10:04", szoveg: "Lefekszünk?", isTarget: false },
-      { felado: "CukiLány", ido: "10:04", szoveg: "Nem, kösz, viszlát.", isTarget: true },
-    ]
-  },
-  {
-    id: "REP-1041",
-    datum: "2026. 07. 27. 22:45",
-    bejelentoNev: "KovácsPéter",
-    bejelentoEmail: "peti@example.com",
-    bejelentoEloelet: { helyes: 2, alaptalan: 1 },
-    celpontNev: "ReklámosBot",
-    celpontEmail: "bot@spam.com",
-    ok: "Kéretlen reklám / Link küldése",
-    statusz: "megoldott",
-    celpontEloelet: { korabbiTiltasok: [] },
-    chatLog: [
-      { felado: "ReklámosBot", ido: "22:44", szoveg: "Nézd meg a kamerámat ezen a linken: http://scam-link.com", isTarget: true },
-    ]
-  }
-];
 
 export default function AdminVezerlokozpont() {
   const { data: session, status } = useSession();
@@ -118,7 +59,11 @@ export default function AdminVezerlokozpont() {
 
   const [managingUser, setManagingUser] = useState<UserData | null>(null);
 
-  const [selectedReport, setSelectedReport] = useState<MockReport | null>(null);
+  const [reports, setReports] = useState<JelentesAdat[]>([]);
+  const [isLoadingReports, setIsLoadingReports] = useState(false);
+  const [hasLoadedReports, setHasLoadedReports] = useState(false);
+
+  const [selectedReport, setSelectedReport] = useState<JelentesAdat | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -169,6 +114,33 @@ export default function AdminVezerlokozpont() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isAdmin, hasLoadedUsers]);
 
+  const betoltJelentesek = () => {
+    setIsLoadingReports(true);
+    fetch("/api/admin/reports")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setReports(data);
+          setHasLoadedReports(true);
+        }
+        setIsLoadingReports(false);
+      })
+      .catch((err) => {
+        console.error("Hiba a jelentések lekérésekor", err);
+        setIsLoadingReports(false);
+      });
+  };
+
+  // A jelentéseket már akkor betöltjük, amint az admin-jogosultság megerősítést
+  // nyer (nem csak a "Jelentések" fülre kattintva), hogy a főmenü kártyáján és
+  // a fül címkéjén lévő "függőben lévő jelentések" jelvény azonnal pontos legyen.
+  useEffect(() => {
+    if (isAdmin && !hasLoadedReports) {
+      betoltJelentesek();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, hasLoadedReports]);
+
   const handleIpKereses = () => {
     setIpKeresesFolyamatban(true);
     betoltFelhasznalok(ipKereses.trim() || undefined);
@@ -201,9 +173,9 @@ export default function AdminVezerlokozpont() {
   };
 
   const filteredReports = useMemo(() => {
-    if (reportFilter === "osszes") return MOCK_REPORTS;
-    return MOCK_REPORTS.filter((r) => r.statusz === reportFilter);
-  }, [reportFilter]);
+    if (reportFilter === "osszes") return reports;
+    return reports.filter((r) => r.statusz === reportFilter);
+  }, [reports, reportFilter]);
 
   if (status === "loading" || isAdmin === null) {
     return (
@@ -215,7 +187,7 @@ export default function AdminVezerlokozpont() {
 
   const adminokSzama = users.filter((u) => u.isAdmin).length;
   const premiumSzama = users.filter((u) => u.isPremium).length;
-  const fuggoJelentesekSzama = MOCK_REPORTS.filter((r) => r.statusz === "fuggo").length;
+  const fuggoJelentesekSzama = reports.filter((r) => r.statusz === "fuggo").length;
 
   return (
     <main className="min-h-screen bg-[#0a0c11] text-white p-4 sm:p-8">
@@ -447,6 +419,12 @@ export default function AdminVezerlokozpont() {
                   <h2 className="text-xl font-bold text-orange-400 mb-1">Jelentések Kezelése</h2>
                   <p className="text-sm text-gray-400">Tekintsd át a felhasználók által beküldött panaszokat és szabálysértéseket.</p>
                 </div>
+                <button
+                  onClick={betoltJelentesek}
+                  className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs transition shrink-0"
+                >
+                  ⟳ Frissítés
+                </button>
               </div>
 
               {/* JELENTÉS AL-FÜLEK */}
@@ -481,7 +459,9 @@ export default function AdminVezerlokozpont() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredReports.length === 0 ? (
+                  {isLoadingReports ? (
+                    <tr><td colSpan={6} className="text-center py-12 text-gray-500">Betöltés...</td></tr>
+                  ) : filteredReports.length === 0 ? (
                     <tr><td colSpan={6} className="text-center py-12 text-gray-500">Nincs a szűrésnek megfelelő jelentés.</td></tr>
                   ) : (
                     filteredReports.map((report) => (
@@ -540,6 +520,10 @@ export default function AdminVezerlokozpont() {
         <ReportDetailsModal
           report={selectedReport}
           onClose={() => setSelectedReport(null)}
+          onUpdated={(updated) => {
+            setReports((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+            setSelectedReport(null);
+          }}
         />
       )}
     </main>
@@ -573,9 +557,11 @@ const PRE_WRITTEN_REASONS = {
 function ReportDetailsModal({
   report,
   onClose,
+  onUpdated,
 }: {
-  report: MockReport;
+  report: JelentesAdat;
   onClose: () => void;
+  onUpdated: (updated: JelentesAdat) => void;
 }) {
   const [activeTab, setActiveTab] = useState<"celpont" | "bejelento">("celpont");
 
@@ -583,6 +569,9 @@ function ReportDetailsModal({
     celpont: { duration: null, customDate: "", reason: "" },
     bejelento: { duration: null, customDate: "", reason: "" },
   });
+
+  const [kuldesFolyamatban, setKuldesFolyamatban] = useState(false);
+  const [hiba, setHiba] = useState<string | null>(null);
 
   const updateCurrentBan = (field: keyof BanState, value: string | null) => {
     setBanData(prev => ({
@@ -597,9 +586,66 @@ function ReportDetailsModal({
     updateCurrentBan("reason", newVal);
   };
 
-  const handleBanSubmit = () => {
-    console.log("Szankciók végrehajtva:", banData);
-    onClose();
+  const handleBanSubmit = async () => {
+    setKuldesFolyamatban(true);
+    setHiba(null);
+    try {
+      const res = await fetch(`/api/admin/reports/${report.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "szankcio",
+          celpont: banData.celpont.duration
+            ? {
+                duration: banData.celpont.duration,
+                customDate: banData.celpont.customDate || null,
+                reason: banData.celpont.reason,
+              }
+            : undefined,
+          bejelento: banData.bejelento.duration
+            ? {
+                duration: banData.bejelento.duration,
+                customDate: banData.bejelento.customDate || null,
+                reason: banData.bejelento.reason,
+              }
+            : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setHiba(data.error || "Ismeretlen hiba történt.");
+        setKuldesFolyamatban(false);
+        return;
+      }
+      onUpdated(data);
+    } catch (err) {
+      console.error(err);
+      setHiba("Szerver hiba történt a szankció végrehajtása közben.");
+      setKuldesFolyamatban(false);
+    }
+  };
+
+  const handleElutasitas = async () => {
+    setKuldesFolyamatban(true);
+    setHiba(null);
+    try {
+      const res = await fetch(`/api/admin/reports/${report.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "elutasit" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setHiba(data.error || "Ismeretlen hiba történt.");
+        setKuldesFolyamatban(false);
+        return;
+      }
+      onUpdated(data);
+    } catch (err) {
+      console.error(err);
+      setHiba("Szerver hiba történt az elutasítás közben.");
+      setKuldesFolyamatban(false);
+    }
   };
 
   const canSubmit = banData.celpont.duration !== null || banData.bejelento.duration !== null;
@@ -813,25 +859,36 @@ function ReportDetailsModal({
             </div>
           </div>
 
+          {hiba && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">
+              {hiba}
+            </div>
+          )}
+
           {/* Alsó gombsor */}
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-2 pt-4 border-t border-white/5">
-            <button onClick={onClose} className="text-gray-400 hover:text-white text-sm transition font-medium">
+            <button
+              onClick={onClose}
+              disabled={kuldesFolyamatban}
+              className="text-gray-400 hover:text-white text-sm transition font-medium disabled:opacity-50"
+            >
               Későbbre hagyom (Ablak bezárása)
             </button>
 
             <div className="flex gap-3 w-full sm:w-auto">
               <button
-                onClick={() => { console.log("Jelentés elutasítva"); onClose(); }}
-                className="flex-1 sm:flex-none px-6 py-3 rounded-xl bg-gray-500/10 hover:bg-gray-500/20 border border-gray-500/30 text-gray-400 text-sm font-bold transition"
+                onClick={handleElutasitas}
+                disabled={kuldesFolyamatban}
+                className="flex-1 sm:flex-none px-6 py-3 rounded-xl bg-gray-500/10 hover:bg-gray-500/20 border border-gray-500/30 text-gray-400 text-sm font-bold transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Jelentés Elutasítása (Alaptalan)
               </button>
               <button
                 onClick={handleBanSubmit}
-                disabled={!canSubmit}
+                disabled={!canSubmit || kuldesFolyamatban}
                 className="flex-1 sm:flex-none px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Szankciók Végrehajtása
+                {kuldesFolyamatban ? "Feldolgozás..." : "Szankciók Végrehajtása"}
               </button>
             </div>
           </div>

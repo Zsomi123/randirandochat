@@ -175,6 +175,36 @@ async function lekerdezFelhasznaloLimitAdatok(email) {
   }
 }
 
+// ÚJ: A FELHASZNÁLÓ KITILTÁS-ÁLLAPOTÁNAK LEKÉRDEZÉSE (email alapján) ---
+// Ez teszi ténylegesen érvényesített szabállyá az admin felületen (és a
+// jelentések elbírálásakor) beállított isBanned/bannedUntil/banReason mezőket:
+// e nélkül a User táblán ezek eddig csak informatívak voltak (lásd a
+// /api/user/me route.ts megjegyzését), a párosítás soha nem nézte őket.
+// Egy lejárt (bannedUntil a múltban van) tiltást már nem veszünk figyelembe.
+async function ellenorizTiltas(email) {
+  if (!email) return { tiltva: false };
+  try {
+    const user = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
+      select: { isBanned: true, bannedUntil: true, banReason: true },
+    });
+
+    if (!user || !user.isBanned) return { tiltva: false };
+
+    if (user.bannedUntil && user.bannedUntil.getTime() <= Date.now()) {
+      return { tiltva: false };
+    }
+
+    return { tiltva: true, bannedUntil: user.bannedUntil, banReason: user.banReason };
+  } catch (error) {
+    console.error(
+      "❌ Hiba a tiltás-ellenőrzéskor (lehet, hogy a server.js Prisma Clientje elavult - próbáld: npx prisma generate, majd indítsd újra a szervert):",
+      error
+    );
+    return { tiltva: false };
+  }
+}
+
 async function lekerdezMaiHasznalat(azonosito) {
   if (!azonosito) return 0;
   try {
@@ -337,6 +367,18 @@ io.on("connection", (socket) => {
       return;
     }
 
+    // ÚJ: KITILTÁS ELLENŐRZÉSE – a kitiltott (isBanned=true, és a bannedUntil
+    // még nem járt le) felhasználók nem állhatnak sorba párosításra.
+    const tiltasAllapot = await ellenorizTiltas(email);
+    if (tiltasAllapot.tiltva) {
+      socket.emit("kitiltva", {
+        bannedUntil: tiltasAllapot.bannedUntil,
+        indoklas: tiltasAllapot.banReason,
+      });
+      console.log(`🚫 ${email} kitiltott felhasználó próbált párosítani – elutasítva.`);
+      return;
+    }
+
     const ujUser = {
       socketId: socket.id,
       ip: clientIp,
@@ -466,6 +508,67 @@ io.on("connection", (socket) => {
       console.log(`👋 ${socket.id} elhagyta a szobát: ${szobaNev}`);
     }
     varolista = varolista.filter((u) => u.socketId !== socket.id);
+  });
+
+  // ÚJ: JELENTÉS (REPORT) MENTÉSE ADATBÁZISBA.
+  // A frontend (dashboard page.tsx) ezt az eseményt küldi el a "Jelentés
+  // beküldése" gombra kattintva, majd rögtön ezután a meglévő
+  // "partner_eldobasa" folyamattal bontja is a kapcsolatot – itt tehát
+  // KIZÁRÓLAG a jelentés elmentése a feladat, a szoba bontásához nem kell
+  // hozzányúlni.
+  socket.on("partner_jelentese", async (adat) => {
+    try {
+      const szobaNev = socket.aktualisSzoba;
+      if (!szobaNev) {
+        console.log(`⚠️ ${socket.id} jelentést próbált küldeni aktív szoba nélkül – elutasítva.`);
+        return;
+      }
+
+      const szobaTagok = io.sockets.adapter.rooms.get(szobaNev);
+      let partnerSocket = null;
+      if (szobaTagok) {
+        for (const sid of szobaTagok) {
+          if (sid !== socket.id) {
+            partnerSocket = io.sockets.sockets.get(sid);
+            break;
+          }
+        }
+      }
+
+      const sajat = socket.sajatAdatok;
+      const partnerAdatok = partnerSocket ? partnerSocket.sajatAdatok : null;
+
+      if (!sajat || !sajat.email || !partnerAdatok || !partnerAdatok.email) {
+        console.log("⚠️ Jelentés elutasítva: hiányzó bejelentő vagy célpont adat.");
+        return;
+      }
+
+      const okok =
+        typeof adat?.ok === "string"
+          ? adat.ok.split(",").map((o) => o.trim()).filter(Boolean)
+          : [];
+
+      await prisma.report.create({
+        data: {
+          reporterEmail: sajat.email,
+          reporterNev: sajat.nev || null,
+          targetEmail: partnerAdatok.email,
+          targetNev: partnerAdatok.nev || null,
+          okok,
+          reszletek: adat?.reszletek || null,
+          chatLog: Array.isArray(adat?.beszelgetes) ? adat.beszelgetes : [],
+        },
+      });
+
+      console.log(
+        `🚩 Jelentés mentve: ${sajat.email} → ${partnerAdatok.email} (${okok.join(", ") || "nincs ok megadva"})`
+      );
+    } catch (error) {
+      console.error(
+        "❌ Hiba a jelentés mentésekor (lehet, hogy a server.js Prisma Clientje elavult - próbáld: npx prisma generate, majd indítsd újra a szervert):",
+        error
+      );
+    }
   });
 
   socket.on("disconnect", () => {

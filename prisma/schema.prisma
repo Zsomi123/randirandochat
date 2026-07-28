@@ -90,3 +90,45 @@ model NapiLimit {
   hasznalt  Int     @default(0)
   datum     String  // Mai dátum (pl. "2026-07-22"), így éjfélkor magától "nullázódik"
 }
+
+// --- ÚJ: JELENTÉS (REPORT) RENDSZER ---
+// Egy chat közben leadott jelentés: ki jelentette, kit, milyen okkal, és a hozzá
+// csatolt beszélgetés-napló. Az admin felület ("Jelentések" fül) ez alapján dolgozik,
+// és innen indul a tényleges kitiltás (User.isBanned / bannedUntil / banReason) is.
+model Report {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // --- BEJELENTŐ ---
+  reporterEmail String
+  reporterNev   String?
+
+  // --- CÉLPONT (a jelentett felhasználó) ---
+  targetEmail String
+  targetNev   String?
+
+  // --- A JELENTÉS TARTALMA ---
+  okok      String[] // pl. ["Sértő megjegyzések", "Spam / Bot"]
+  reszletek String?  @db.Text
+  chatLog   Json     // a beszélgetés naplója a jelentés pillanatában (a frontend Uzenet[] típusa)
+
+  // --- ELBÍRÁLÁS ÁLLAPOTA ---
+  statusz String @default("fuggo") // fuggo | folyamatban | megoldott | elutasitott
+
+  elbiraloEmail String?
+  elbiraltIdo   DateTime?
+
+  // --- A CÉLPONTRA KISZABOTT SZANKCIÓ (ha az admin alkalmazott ilyet) ---
+  celpontSzankcioIndoklas    String?   @db.Text
+  celpontSzankcioLejarat     DateTime? // null = végleges tiltás (ha celpontSzankcioAlkalmazva = true)
+  celpontSzankcioAlkalmazva  Boolean   @default(false)
+
+  // --- A BEJELENTŐRE KISZABOTT SZANKCIÓ (pl. alaptalan/rosszhiszemű jelentés esetén) ---
+  bejelentoSzankcioIndoklas   String?   @db.Text
+  bejelentoSzankcioLejarat    DateTime?
+  bejelentoSzankcioAlkalmazva Boolean   @default(false)
+
+  @@index([reporterEmail])
+  @@index([targetEmail])
+  @@index([statusz])
+}

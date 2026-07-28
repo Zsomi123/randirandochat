@@ -73,6 +73,9 @@ function DashboardTartalom() {
   const [reportOka, setReportOka] = useState<string[]>([]);
   const [reportReszletek, setReportReszletek] = useState("");
 
+  // --- ÚJ: KITILTÁS ÁLLAPOT (a szerver "kitiltva" eseményéből) ---
+  const [tiltasAdat, setTiltasAdat] = useState<{ bannedUntil: string | null; indoklas: string | null } | null>(null);
+
   const gorditoRef = useRef<HTMLDivElement>(null);
   const uzenetVegRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -160,6 +163,12 @@ function DashboardTartalom() {
       console.warn("🚫 Napi párosítási limit elérve:", adat);
       setNapiLimit(adat);
       setUjraindulasCelIdo(Date.now() + (adat?.ujraindulasMs || 0));
+      setKeresesFolyamatban(false);
+    });
+
+    ujSocket.on("kitiltva", (adat) => {
+      console.warn("🚫 Kitiltott felhasználóként próbáltál párosítani:", adat);
+      setTiltasAdat({ bannedUntil: adat?.bannedUntil || null, indoklas: adat?.indoklas || null });
       setKeresesFolyamatban(false);
     });
 
@@ -339,6 +348,50 @@ function DashboardTartalom() {
             className="mt-1 text-xs text-gray-500 hover:text-pink-400 transition"
           >
             ← Vissza a beállításokhoz
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (tiltasAdat) {
+    return (
+      <main className="flex h-screen flex-col items-center justify-center bg-[#0a0c11] p-6 text-white">
+        <div className="flex flex-col items-center gap-3 p-8 sm:p-10 bg-white/[0.02] rounded-3xl border border-red-500/20 shadow-xl max-w-sm w-full text-center">
+          <span className="text-4xl">🔨</span>
+          <h2 className="font-[family-name:var(--font-fraunces)] italic text-xl text-red-400">
+            Ki lettél tiltva
+          </h2>
+
+          <p className="text-sm text-gray-400 leading-relaxed">
+            A fiókodat/IP-címedet moderátoraink kitiltották a párosítási rendszerből
+            {tiltasAdat.indoklas ? (
+              <>
+                {" "}
+                az alábbi indoklással: <span className="text-white font-semibold">{tiltasAdat.indoklas}</span>
+              </>
+            ) : (
+              "."
+            )}
+          </p>
+
+          <div className="mt-2 px-4 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-gray-300">
+            {tiltasAdat.bannedUntil
+              ? (
+                <>
+                  A tiltás vége: <span className="text-white font-[family-name:var(--font-geist-mono)]">
+                    {new Date(tiltasAdat.bannedUntil).toLocaleString("hu-HU", { timeZone: "Europe/Budapest" })}
+                  </span>
+                </>
+              )
+              : "Ez egy végleges kitiltás."}
+          </div>
+
+          <button
+            onClick={() => router.push("/")}
+            className="mt-4 w-full px-5 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-bold rounded-xl transition active:scale-95"
+          >
+            ← Vissza a főoldalra
           </button>
         </div>
       </main>
