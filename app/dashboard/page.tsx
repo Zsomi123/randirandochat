@@ -68,6 +68,11 @@ function DashboardTartalom() {
   const [ujraindulasCelIdo, setUjraindulasCelIdo] = useState<number | null>(null);
   const [hatralevoIdo, setHatralevoIdo] = useState(0);
 
+  // --- ÚJ: JELENTÉS (REPORT) ÁLLAPOTOK ---
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportOka, setReportOka] = useState<string[]>([]);
+  const [reportReszletek, setReportReszletek] = useState("");
+
   const gorditoRef = useRef<HTMLDivElement>(null);
   const uzenetVegRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -110,7 +115,7 @@ function DashboardTartalom() {
     };
   };
 
-  // 2. SOCKET CSATLAKOZÁS (csak hitelesített, profil-adatokkal rendelkező felhasználóknak)
+  // 2. SOCKET CSATLAKOZÁS
   useEffect(() => {
     if (!sajatAdatok || status !== "authenticated") return;
 
@@ -124,7 +129,6 @@ function DashboardTartalom() {
     });
 
     ujSocket.on("bejelentkezes_szukseges", () => {
-      // A szerver is megköveteli a bejelentkezést – irányítsuk vissza a főoldalra.
       router.push("/");
     });
 
@@ -188,7 +192,6 @@ function DashboardTartalom() {
     } else if (utolso.felado !== "en") {
       setOlvasatlanSzam((n) => n + 1);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uzenetek]);
 
   useEffect(() => {
@@ -198,7 +201,6 @@ function DashboardTartalom() {
     }
   }, [keresesFolyamatban]);
 
-  // NAPI LIMIT VISSZASZÁMLÁLÓ – másodpercenként frissül, és lejáratkor automatikusan újrapróbálkozik
   useEffect(() => {
     if (!ujraindulasCelIdo) return;
 
@@ -265,9 +267,7 @@ function DashboardTartalom() {
 
   const handleKovetkezoPartner = () => {
     if (!socket) return;
-
     socket.emit("partner_eldobasa");
-
     setKeresesFolyamatban(true);
     setPartner(null);
     setKozosHobbik([]);
@@ -275,8 +275,36 @@ function DashboardTartalom() {
     setOlvasatlanSzam(0);
     setAlulVagyunk(true);
     setPartnerElhagyta(false);
-
     socket.emit("regisztracio_parositasra", regisztraciosAdat());
+  };
+
+  // --- ÚJ: JELENTÉS FUNKCIÓK ---
+  const toggleJelentesOk = (ok: string) => {
+    setReportOka((prev) =>
+      prev.includes(ok) ? prev.filter((o) => o !== ok) : [...prev, ok]
+    );
+  };
+
+  const handleJelentesKuldese = () => {
+    if (!socket) return;
+    if (reportOka.length === 0 && !reportReszletek.trim()) {
+      alert("Kérlek válassz legalább egy okot, vagy írj indoklást!");
+      return;
+    }
+
+    const okString = reportOka.length > 0 ? reportOka.join(", ") : "Egyéb";
+
+    socket.emit("partner_jelentese", {
+      ok: okString,
+      reszletek: reportReszletek,
+      beszelgetes: uzenetek, // Csatoljuk a chat logot is
+    });
+
+    alert("Jelentés sikeresen beküldve. A rendszert bontotta a kapcsolatot a partnerrel.");
+    setIsReportModalOpen(false);
+    setReportOka([]);
+    setReportReszletek("");
+    handleKovetkezoPartner(); // Automatikus szétkapcsolás és új keresés
   };
 
   // --- BEJELENTKEZÉS KÖTELEZŐ – vendég mód nincs többé ---
@@ -387,192 +415,254 @@ function DashboardTartalom() {
   }
 
   return (
-    <main className="relative h-[100dvh] w-full bg-[#0a0c11] text-white overflow-hidden flex items-center justify-center sm:p-6 lg:p-10">
-      <style>{`
-        @keyframes uzenet-becsuszik {
-          from { opacity: 0; transform: translateY(8px) scale(0.98); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        .uzenet-animalt { animation: uzenet-becsuszik 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
-        @media (prefers-reduced-motion: reduce) {
-          .uzenet-animalt { animation: none; }
-        }
-      `}</style>
+    <>
+      <main className="relative h-[100dvh] w-full bg-[#0a0c11] text-white overflow-hidden flex items-center justify-center sm:p-6 lg:p-10">
+        <style>{`
+          @keyframes uzenet-becsuszik {
+            from { opacity: 0; transform: translateY(8px) scale(0.98); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+          }
+          .uzenet-animalt { animation: uzenet-becsuszik 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
+          @media (prefers-reduced-motion: reduce) {
+            .uzenet-animalt { animation: none; }
+          }
+        `}</style>
 
-      <div className="hidden sm:block pointer-events-none absolute -top-24 -left-24 w-80 h-80 rounded-full bg-pink-500/10 blur-3xl" aria-hidden="true" />
-      <div className="hidden sm:block pointer-events-none absolute -bottom-24 -right-24 w-80 h-80 rounded-full bg-rose-500/10 blur-3xl" aria-hidden="true" />
+        <div className="hidden sm:block pointer-events-none absolute -top-24 -left-24 w-80 h-80 rounded-full bg-pink-500/10 blur-3xl" aria-hidden="true" />
+        <div className="hidden sm:block pointer-events-none absolute -bottom-24 -right-24 w-80 h-80 rounded-full bg-rose-500/10 blur-3xl" aria-hidden="true" />
 
-      <div className="relative w-full h-full sm:h-[min(88dvh,760px)] sm:max-w-xl sm:rounded-3xl sm:border sm:border-white/[0.08] sm:shadow-2xl sm:shadow-black/40 flex flex-col bg-[#0a0c11] sm:bg-[#0d0f15] overflow-hidden">
-      <header className="px-3 sm:px-5 py-3 bg-[#0d0f15]/90 backdrop-blur border-b border-white/[0.07] shadow-md flex items-start gap-2 z-10 shrink-0">
-        <button
-          onClick={() => router.push("/")}
-          aria-label="Vissza a főoldalra"
-          className="p-1.5 mt-0.5 shrink-0 text-gray-500 hover:text-pink-400 transition text-sm font-bold rounded-lg hover:bg-white/[0.04] active:scale-90"
-        >
-          ←
-        </button>
+        <div className="relative w-full h-full sm:h-[min(88dvh,760px)] sm:max-w-xl sm:rounded-3xl sm:border sm:border-white/[0.08] sm:shadow-2xl sm:shadow-black/40 flex flex-col bg-[#0a0c11] sm:bg-[#0d0f15] overflow-hidden">
+        <header className="px-3 sm:px-5 py-3 bg-[#0d0f15]/90 backdrop-blur border-b border-white/[0.07] shadow-md flex items-start gap-2 z-10 shrink-0">
+          <button
+            onClick={() => router.push("/")}
+            aria-label="Vissza a főoldalra"
+            className="p-1.5 mt-0.5 shrink-0 text-gray-500 hover:text-pink-400 transition text-sm font-bold rounded-lg hover:bg-white/[0.04] active:scale-90"
+          >
+            ←
+          </button>
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="relative flex h-2 w-2 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
-            </span>
-            <h2 className="font-[family-name:var(--font-fraunces)] italic text-lg sm:text-xl text-pink-400 truncate min-w-0">
-              {partner?.becenev}
-            </h2>
-            <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 font-semibold uppercase tracking-wider border border-pink-500/20">
-              {partner?.nem} · {partner?.kor}
-            </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+              </span>
+              <h2 className="font-[family-name:var(--font-fraunces)] italic text-lg sm:text-xl text-pink-400 truncate min-w-0">
+                {partner?.becenev}
+              </h2>
+              <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 font-semibold uppercase tracking-wider border border-pink-500/20">
+                {partner?.nem} · {partner?.kor}
+              </span>
+            </div>
+            {kozosHobbik.length > 0 && (
+              <p className="text-[11px] text-gray-500 mt-1 truncate">
+                Közös érdeklődés: <span className="text-pink-400">{kozosHobbik.join(", ")}</span>
+              </p>
+            )}
           </div>
-          {kozosHobbik.length > 0 && (
-            <p className="text-[11px] text-gray-500 mt-1 truncate">
-              Közös érdeklődés: <span className="text-pink-400">{kozosHobbik.join(", ")}</span>
-            </p>
+
+          <div className="shrink-0 flex items-center gap-1.5 sm:gap-2">
+            <button
+              onClick={handleKovetkezoPartner}
+              aria-label="Következő partner"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold bg-white/[0.04] hover:bg-white/[0.08] text-gray-300 hover:text-white rounded-lg border border-white/10 transition active:scale-95 whitespace-nowrap"
+            >
+              <span className="sm:hidden">Következő →</span>
+              <span className="hidden sm:inline">Következő partner →</span>
+            </button>
+
+            <button
+              onClick={() => setIsReportModalOpen(true)}
+              disabled={partnerElhagyta}
+              aria-label="Partner jelentése"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 9v4M12 17h.01" />
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+              </svg>
+              <span className="hidden sm:inline">Jelentés</span>
+            </button>
+          </div>
+        </header>
+
+        <div className="relative flex-1 min-h-0">
+          <section
+            ref={gorditoRef}
+            onScroll={handleGordites}
+            className="h-full overflow-y-auto p-3 sm:p-6 space-y-1 scrollbar-thin"
+          >
+            {uzenetek.map((uz, i) => {
+              const elozo = uzenetek[i - 1];
+              const kovetkezo = uzenetek[i + 1];
+              const csoportEleje = !elozo || elozo.felado !== uz.felado;
+              const csoportVege = !kovetkezo || kovetkezo.felado !== uz.felado;
+
+              if (uz.felado === "rendszer") {
+                return (
+                  <div key={i} className="uzenet-animalt flex justify-center py-2">
+                    <span className="max-w-[90%] px-4 py-1.5 rounded-full text-[11px] text-center text-gray-400 bg-white/[0.04] border border-white/[0.07]">
+                      {uz.szoveg}
+                    </span>
+                  </div>
+                );
+              }
+
+              const enUzenem = uz.felado === "en";
+
+              return (
+                <div
+                  key={i}
+                  className={`uzenet-animalt flex items-end gap-2 ${enUzenem ? "justify-end" : "justify-start"} ${
+                    csoportEleje ? "mt-3" : "mt-0.5"
+                  }`}
+                >
+                  {!enUzenem &&
+                    (csoportVege ? (
+                      <span className="shrink-0 mb-0.5 w-7 h-7 rounded-full bg-gradient-to-br from-pink-500/40 to-rose-600/40 border border-pink-500/30 flex items-center justify-center text-[11px] font-bold text-pink-300">
+                        {partner?.becenev?.[0]?.toUpperCase() || "?"}
+                      </span>
+                    ) : (
+                      <span className="shrink-0 w-7" aria-hidden="true" />
+                    ))}
+
+                  <div className={`flex flex-col ${enUzenem ? "items-end" : "items-start"} max-w-[78%] sm:max-w-[60%]`}>
+                    <div
+                      className={`px-4 py-2.5 text-sm shadow-sm break-words whitespace-pre-wrap leading-relaxed ${
+                        enUzenem
+                          ? `bg-gradient-to-br from-pink-500 to-rose-600 text-white rounded-2xl ${
+                              csoportVege ? "rounded-br-md" : "rounded-br-2xl"
+                            }`
+                          : `bg-white/[0.06] text-gray-100 rounded-2xl ${
+                              csoportVege ? "rounded-bl-md" : "rounded-bl-2xl"
+                            }`
+                      }`}
+                    >
+                      {uz.szoveg}
+                    </div>
+                    {csoportVege && (
+                      <span className="text-[10px] text-gray-600 mt-1 px-1 font-[family-name:var(--font-geist-mono)]">
+                        {idoFormazas(uz.ido)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={uzenetVegRef} />
+          </section>
+
+          {!alulVagyunk && (
+            <button
+              onClick={ugrasAljara}
+              className="absolute bottom-3 right-3 sm:right-6 flex items-center gap-1.5 pl-3 pr-2.5 py-2 rounded-full bg-[#161922] hover:bg-[#1d212c] border border-white/10 shadow-lg text-xs font-semibold text-gray-200 transition active:scale-95"
+            >
+              {olvasatlanSzam > 0 ? `${olvasatlanSzam} új üzenet` : "Legalulra"}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12l7 7 7-7" />
+              </svg>
+            </button>
           )}
         </div>
 
-        <div className="shrink-0 flex items-center gap-1.5 sm:gap-2">
-          <button
-            onClick={handleKovetkezoPartner}
-            aria-label="Következő partner"
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold bg-white/[0.04] hover:bg-white/[0.08] text-gray-300 hover:text-white rounded-lg border border-white/10 transition active:scale-95 whitespace-nowrap"
-          >
-            <span className="sm:hidden">Következő →</span>
-            <span className="hidden sm:inline">Következő partner →</span>
-          </button>
-
-          <button
-            onClick={() => alert("Jelentés beküldve.")}
-            aria-label="Partner jelentése"
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition active:scale-95"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 9v4M12 17h.01" />
-              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-            </svg>
-            <span className="hidden sm:inline">Jelentés</span>
-          </button>
-        </div>
-      </header>
-
-      <div className="relative flex-1 min-h-0">
-        <section
-          ref={gorditoRef}
-          onScroll={handleGordites}
-          className="h-full overflow-y-auto p-3 sm:p-6 space-y-1 scrollbar-thin"
+        <footer
+          className="p-2.5 sm:p-4 bg-[#0d0f15]/90 backdrop-blur border-t border-white/[0.07] flex items-end gap-2 sm:gap-3 z-10 shrink-0"
+          style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}
         >
-          {uzenetek.map((uz, i) => {
-            const elozo = uzenetek[i - 1];
-            const kovetkezo = uzenetek[i + 1];
-            const csoportEleje = !elozo || elozo.felado !== uz.felado;
-            const csoportVege = !kovetkezo || kovetkezo.felado !== uz.felado;
+          <form onSubmit={handleKuldes} className="w-full flex gap-2 items-end">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              placeholder={
+                partnerElhagyta
+                  ? "A partnered elhagyta a chatet – kattints a Következő partnerre…"
+                  : partner
+                  ? `Írj ${partner.becenev} részére…`
+                  : "Írj egy üzenetet…"
+              }
+              value={uzenetSzoveg}
+              onChange={(e) => setUzenetSzoveg(e.target.value)}
+              onKeyDown={handleBillentyu}
+              maxLength={MAX_UZENET_HOSSZ}
+              disabled={partnerElhagyta}
+              className="flex-1 p-3 rounded-xl bg-white/[0.03] border border-white/10 focus:border-pink-500 text-white text-sm transition outline-none resize-none leading-relaxed disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ maxHeight: TEXTAREA_MAX_MAGASSAG }}
+            />
+            <button
+              type="submit"
+              disabled={!uzenetSzoveg.trim() || partnerElhagyta}
+              aria-label="Üzenet küldése"
+              className="shrink-0 h-[44px] px-4 sm:px-6 bg-pink-500 hover:bg-pink-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl transition active:scale-95 flex items-center justify-center gap-1.5"
+            >
+              <span className="hidden sm:inline text-sm">Küldés</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M22 2 11 13M22 2 15 22l-4-9-9-4Z" />
+              </svg>
+            </button>
+          </form>
+        </footer>
+        </div>
+      </main>
 
-            if (uz.felado === "rendszer") {
-              return (
-                <div key={i} className="uzenet-animalt flex justify-center py-2">
-                  <span className="max-w-[90%] px-4 py-1.5 rounded-full text-[11px] text-center text-gray-400 bg-white/[0.04] border border-white/[0.07]">
-                    {uz.szoveg}
-                  </span>
-                </div>
-              );
-            }
+      {/* --- ÚJ: JELENTÉS FELUGRÓ ABLAK --- */}
+      {isReportModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-[#12151c] border border-white/10 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-5 sm:p-6 border-b border-white/10">
+              <h3 className="text-xl font-bold text-red-400 flex items-center gap-2">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Felhasználó jelentése
+              </h3>
+              <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+                Kérlek, jelöld be, hogy milyen problémát tapasztaltál! A jelentéshez automatikusan csatoljuk a beszélgetés előzményeit.
+              </p>
+            </div>
 
-            const enUzenem = uz.felado === "en";
-
-            return (
-              <div
-                key={i}
-                className={`uzenet-animalt flex items-end gap-2 ${enUzenem ? "justify-end" : "justify-start"} ${
-                  csoportEleje ? "mt-3" : "mt-0.5"
-                }`}
-              >
-                {!enUzenem &&
-                  (csoportVege ? (
-                    <span className="shrink-0 mb-0.5 w-7 h-7 rounded-full bg-gradient-to-br from-pink-500/40 to-rose-600/40 border border-pink-500/30 flex items-center justify-center text-[11px] font-bold text-pink-300">
-                      {partner?.becenev?.[0]?.toUpperCase() || "?"}
-                    </span>
-                  ) : (
-                    <span className="shrink-0 w-7" aria-hidden="true" />
+            <div className="p-5 sm:p-6 space-y-5">
+              <div>
+                <label className="text-sm font-semibold text-gray-300 block mb-3">Mi a probléma? (Többet is választhatsz)</label>
+                <div className="space-y-2">
+                  {[
+                    "Sértő megjegyzések",
+                    "Szexuális tartalom / Zaklatás",
+                    "Hirdetés / Reklám",
+                    "Spam / Bot",
+                    "Egyéb szabályszegés"
+                  ].map((ok) => (
+                    <label key={ok} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition">
+                      <input
+                        type="checkbox"
+                        checked={reportOka.includes(ok)}
+                        onChange={() => toggleJelentesOk(ok)}
+                        className="w-4 h-4 accent-red-500"
+                      />
+                      <span className="text-sm text-gray-300">{ok}</span>
+                    </label>
                   ))}
-
-                <div className={`flex flex-col ${enUzenem ? "items-end" : "items-start"} max-w-[78%] sm:max-w-[60%]`}>
-                  <div
-                    className={`px-4 py-2.5 text-sm shadow-sm break-words whitespace-pre-wrap leading-relaxed ${
-                      enUzenem
-                        ? `bg-gradient-to-br from-pink-500 to-rose-600 text-white rounded-2xl ${
-                            csoportVege ? "rounded-br-md" : "rounded-br-2xl"
-                          }`
-                        : `bg-white/[0.06] text-gray-100 rounded-2xl ${
-                            csoportVege ? "rounded-bl-md" : "rounded-bl-2xl"
-                          }`
-                    }`}
-                  >
-                    {uz.szoveg}
-                  </div>
-                  {csoportVege && (
-                    <span className="text-[10px] text-gray-600 mt-1 px-1 font-[family-name:var(--font-geist-mono)]">
-                      {idoFormazas(uz.ido)}
-                    </span>
-                  )}
                 </div>
               </div>
-            );
-          })}
-          <div ref={uzenetVegRef} />
-        </section>
+            </div>
 
-        {!alulVagyunk && (
-          <button
-            onClick={ugrasAljara}
-            className="absolute bottom-3 right-3 sm:right-6 flex items-center gap-1.5 pl-3 pr-2.5 py-2 rounded-full bg-[#161922] hover:bg-[#1d212c] border border-white/10 shadow-lg text-xs font-semibold text-gray-200 transition active:scale-95"
-          >
-            {olvasatlanSzam > 0 ? `${olvasatlanSzam} új üzenet` : "Legalulra"}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 5v14M5 12l7 7 7-7" />
-            </svg>
-          </button>
-        )}
-      </div>
-
-      <footer
-        className="p-2.5 sm:p-4 bg-[#0d0f15]/90 backdrop-blur border-t border-white/[0.07] flex items-end gap-2 sm:gap-3 z-10 shrink-0"
-        style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}
-      >
-        <form onSubmit={handleKuldes} className="w-full flex gap-2 items-end">
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            placeholder={
-              partnerElhagyta
-                ? "A partnered elhagyta a chatet – kattints a Következő partnerre…"
-                : partner
-                ? `Írj ${partner.becenev} részére…`
-                : "Írj egy üzenetet…"
-            }
-            value={uzenetSzoveg}
-            onChange={(e) => setUzenetSzoveg(e.target.value)}
-            onKeyDown={handleBillentyu}
-            maxLength={MAX_UZENET_HOSSZ}
-            disabled={partnerElhagyta}
-            className="flex-1 p-3 rounded-xl bg-white/[0.03] border border-white/10 focus:border-pink-500 text-white text-sm transition outline-none resize-none leading-relaxed disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ maxHeight: TEXTAREA_MAX_MAGASSAG }}
-          />
-          <button
-            type="submit"
-            disabled={!uzenetSzoveg.trim() || partnerElhagyta}
-            aria-label="Üzenet küldése"
-            className="shrink-0 h-[44px] px-4 sm:px-6 bg-pink-500 hover:bg-pink-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl transition active:scale-95 flex items-center justify-center gap-1.5"
-          >
-            <span className="hidden sm:inline text-sm">Küldés</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M22 2 11 13M22 2 15 22l-4-9-9-4Z" />
-            </svg>
-          </button>
-        </form>
-      </footer>
-      </div>
-    </main>
+            <div className="p-5 sm:p-6 border-t border-white/10 flex gap-3 justify-end bg-black/20">
+              <button
+                onClick={() => setIsReportModalOpen(false)}
+                className="px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-medium text-white transition active:scale-95"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={handleJelentesKuldese}
+                className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold shadow-lg shadow-red-500/20 transition active:scale-95"
+              >
+                Jelentés beküldése
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
